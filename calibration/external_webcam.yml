@@ -1,8 +1,6 @@
-%YAML:1.0
 image_width: 640
 image_height: 480
-# camera_name: narrow_stereo
-camera_name: webcam
+camera_name: external_webcam
 camera_matrix:
   rows: 3
   cols: 3
