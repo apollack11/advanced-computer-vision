@@ -1,4 +1,5 @@
 #include <ros/ros.h>
+// #include <ros/console.h>
 
 #include <image_transport/image_transport.h> // for subscribing/publishing image topics
 #include <cv_bridge/cv_bridge.h>
@@ -16,6 +17,10 @@
 #include <iostream>
 // #include <list>
 #include <vector>
+#include <cmath>
+#include <iomanip> // std::setw
+#include <typeinfo>
+
 
 #define MAX_INDICES 200
 #define TRAIL_LENGTH 30
@@ -44,8 +49,10 @@ private:
   vector<unsigned char> flow_status;
   vector<Point2f> curr_track_indices;
   vector<Point2f> prev_track_indices;
-  vector<Point2f> prev_track_normalized;
-  vector<Point2f> curr_track_normalized;
+  vector<Point2f> prev_track_centered;
+  vector<Point2f> curr_track_centered;
+  vector<Point2f> curr_track_undistorted;
+  vector<Point2f> prev_track_undistorted;
   string ColorWinName;
   string GrayWinName;
   cv_bridge::CvImagePtr in_ptr;
@@ -56,8 +63,10 @@ private:
   int counter;
   cv::Matx33d F; // Fundamental Matrix
   cv::Matx33d E; // Essential Matrix
-  cv::Matx33d K; // Camera Matrix (from camera calibration file)
-  cv::Mat D; // distorition coefficients (from camera calibration file)
+  cv::Matx33d camera_matrix; // Camera Matrix (from camera calibration file)
+  cv::Mat distortion_coefficients; // distorition coefficients (from camera calibration file)
+  cv::Mat rectification_matrix; // rectification matrix coefficients (from camera calibration file)
+  cv::Mat projection_matrix; // projection matrix coefficients (from camera calibration file)
   Mat out_img; // output image, marked up with flow points and stuff
   Matx33d W;
   Matx33d Winv;
@@ -92,66 +101,111 @@ public:
 
     // cv::FileStorage fs;
     // fs.open("/home/njk/Courses/EECS432/Project/ros_ws/src/eecs432_project/calibration/webcam.xml", cv::FileStorage::READ);
-    // fs["camera_matrix"] >> K;
-    // cout << "K (camera matrix):\n" << K << endl;
+    // fs["camera_matrix"] >> camera_matrix;
+    // cout << "camera_matrix:\n" << camera_matrix << endl;
     // fs.release();
 
     // hack for now since can't initialize the way I want to
-    cv::Matx33d ktmp(0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
-    K = ktmp;
+    // cv::Matx33d ktmp(0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+    cv::Matx33d ktmp(1149.322298, 0.0, 351.778662, 0.0, 1151.593614, 276.459807, 0.0, 0.0, 1.0);
+    camera_matrix = ktmp;
+
     // cv::Mat_ dtmp(-0.073669, 1.170392, 0.000976, -0.00244, 0.0);
-    // D = dtmp;
-    float D_data[5] = {-0.073669, 1.170392, 0.000976, -0.00244, 0.0};
-    D = cv::Mat(1, 5, CV_32F, D_data);
+    // distortion_coefficients = dtmp;
+
+    float distortion_coefficients_data[5] = {-0.073669, 1.170392, 0.000976, -0.00244, 0.0};
+    distortion_coefficients = cv::Mat(1, 5, CV_32F, distortion_coefficients_data);
+
     Matx33d Wtmp(0, -1, 0, 1, 0, 0, 0, 0, 1);
     W = Wtmp;
+
     Matx33d Winvtmp(0, 1, 0, -1, 0, 0, 0, 0, 1);
     Winv = Winvtmp;
 
-  } // END OF CONSTRUCTOR
+    float rectification_matrix_data[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    rectification_matrix = cv::Mat(3, 3, CV_32F, rectification_matrix_data);
+
+    float projection_matrix_data[12] = {1160.519653, 0, 349.420934, 0, 0, 1164.307007, 275.445505, 0, 0, 0, 1, 0};
+    projection_matrix = cv::Mat(3, 4, CV_32F, projection_matrix_data);
+
+  } // END OF CONSTRUCTOR ######################################################
+
 
   ~FlowCalculator()
   {
     cv::destroyAllWindows();
     std::cout << "Nate Kaiser is the best. The end." << std::endl;
-  } // END OF DESTRUCTOR
+  } // END OF DESTRUCTOR #######################################################
+
 
   void img_cb(const sensor_msgs::ImageConstPtr& input)
   {
     // grab the current frame from the camera stream
     try
-    { in_ptr = cv_bridge::toCvCopy(input, sensor_msgs::image_encodings::BGR8); }
+    {
+      in_ptr = cv_bridge::toCvCopy(input, sensor_msgs::image_encodings::BGR8);
+    }
     catch (cv_bridge::Exception& e)
     {
       ROS_ERROR("cv_bridge exception: %s", e.what());
       return;
     }
 
-    curr_color = in_ptr->image;
-    cv::cvtColor(curr_color, curr, CV_BGR2GRAY);
+    curr_color = in_ptr->image; // will use the color version later (for output)
+    cv::cvtColor(curr_color, curr, CV_BGR2GRAY); // create curr (grayscale version of the input)
 
 
     if(!prev.data) // Check for invalid input
     {
-      cout << "prev data not available, assigning to curr data" << std::endl;
-      prev = curr;
+      ROS_WARN("prev data not available, assigning to curr data");
+      curr.copyTo(prev); // deep copy, none of that shared pointer stuff
+      return;
     }
 
     // create vector of good points to track from previous image
     goodFeaturesToTrack(prev, prev_track_indices, MAX_INDICES, 0.2, 0.0);
 
+    if(prev_track_indices.empty()) // check
+    {
+      ROS_WARN("no tracking objects found");
+      curr.copyTo(prev); // deep copy, none of that shared pointer stuff
+      return;
+    }
+
     // find optical flow between previous and current images, store in curr_track_indices
     calcOpticalFlowPyrLK(prev, curr, prev_track_indices, curr_track_indices, flow_status, flow_errs);
+    cout << "prev_track_indices:\n" << prev_track_indices << endl;
+    cout << "curr_track_indices:\n" << curr_track_indices << endl;
+    // cout << "prev_track_indices POINT TYPE:\n" << typeid(prev_track_indices[0]).name() << endl;
+    // cout << "prev_track_indices POINT 0 X:\n" << prev_track_indices[0].x << endl;
 
 
-    // undistort image (before calculating Fundamental Matrix)
-    // THIS CAUSED IT TO BE REALLY SLOW AND LAGGY
-    // undistortPoints(curr_track_indices, curr_track_undistorted, K, D);
-
-    // try undistorting points instead (before calculating Fundamental Matrix)
+    // undistort image (before calculating Fundamental Matrix) - turns out to be too laggy
+    // try undistorting only tracked points instead (before calculating Fundamental Matrix)
     // http://stackoverflow.com/questions/25251676/opencv-findfundamentalmat-very-unstable-and-sensitive
-    prev_track_normalized = normalize(prev_track_indices);
-    curr_track_normalized = normalize(curr_track_indices);
+    // undistortPoints(curr_track_indices, curr_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
+    // undistortPoints(prev_track_indices, prev_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
+    // DOES THIS WORK WITH INDICES OR ACTUAL POINT DATA???? SHOULD BE INDICES, BUT GETTING NANS
+    // The function can be used for both a stereo camera head or a monocular camera (when R is empty).
+    // ^ DOES THIS MEAN I SHOULDN'T BE USIN R OR P (rectification_matrix OR projection_matrix)?
+
+    // undistorting using built-in function isn't workint, try homebrew solution instead:
+    prev_track_undistorted = normalize(prev_track_indices);
+    curr_track_undistorted = normalize(curr_track_indices);
+    cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
+    cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
+
+    // center data per Wu's lecture 12
+    // prev_track_centered = centerData(prev_track_indices);
+    // curr_track_centered = centerData(curr_track_indices);
+    prev_track_centered = centerData(prev_track_undistorted);
+    curr_track_centered = centerData(curr_track_undistorted);
+    cout << "prev_track_centered:\n" << prev_track_centered << endl;
+    cout << "curr_track_centered:\n" << curr_track_centered << endl;
+
+    // NOT SURE WE NEED THIS CHECK:
+    if(curr_track_indices.size() != prev_track_indices.size())
+    { ROS_ERROR("tracking index data size different between previous and current images"); }
 
     // syntax inspiration found at:
     // http://www.morethantechnical.com/2012/02/07/structure-from-motion-and-3d-reconstruction-on-the-easy-in-opencv-2-3-w-code/
@@ -162,28 +216,47 @@ public:
     // for(int k = 0; k < 5; ++k)
     // {
     //   // F = findFundamentalMat(prev_track_indices, curr_track_undistorted, FM_RANSAC, 1, 0.99, flow_status);
-      F = findFundamentalMat(prev_track_indices, curr_track_indices, FM_RANSAC, 1, 0.99, flow_status);
+    // F = findFundamentalMat(prev_track_indices, curr_track_indices, FM_RANSAC, 1, 0.99, flow_status);
+    // ransac sucks, how about this?:
+    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_LMEDS, 1, 0.99, flow_status);
+    // that sucked too, how about this?:
+    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_8POINT, 1, 0.99, flow_status);
+      // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 1, 0.99, flow_status);
+      F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 0.01, 0.99, flow_status); // 0.01 is guess
     //   cout << "F:\n" << F << endl;
     // }
 
-    // xn = inv(K) * x
-    // xn' = inv(K') * x'
-
-    E = K.t() * F * K; // calculate essential matrix from fundamental matrix and camera matrix
+    E = camera_matrix.t() * F * camera_matrix; // calculate essential matrix from fundamental matrix and camera matrix
 
     // helpful clarification:
     // http://stackoverflow.com/questions/16639106/camera-motion-from-corresponding-images
     SVD svd(E);
     R = svd.u * Mat(W) * svd.vt;
     t = svd.u.col(2);
+    cout << "R:\n" << R << '\n' << endl;
 
-    if(!(counter%15)) // every 1/2 second, print:
-    {
-      cout << "F:\n" << F << endl;
-      cout << "E:\n" << E << endl;
-      cout << "R:\n" << R << endl;
-      cout << "t:\n" << t << endl;
-    }
+    // double roll = atan2(R.at<float>(2, 1), R.at<float>(2, 2));
+    // double pitch = asin(R.at<float>(2, 0));
+    // double yaw = -atan2(R.at<float>(1, 0), R.at<float>(0, 0));
+    //
+    // cout << "RPY: " << setw(15) << roll << setw(15) << pitch << setw(15) << yaw << endl;
+
+    // if(!(counter%15)) // every 1/2 second, print:
+    // {
+    //   // cout << "curr_track_indices:\n" << curr_track_indices << endl;
+    //   // cout << "prev_track_indices:\n" << prev_track_indices << endl;
+    //   // cout << "sizes of each:\t" << curr_track_indices.size() << '\t' << prev_track_indices.size() << endl;
+    //   // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
+    //   // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
+    //   // cout << "curr_track_centered:\n" << curr_track_centered << endl;
+    //   // cout << "prev_track_centered:\n" << prev_track_centered << endl;
+    //   // cout << "curr pixel val:\n" << curr.at<cv::Vec3b>(30,30) << endl;
+    //   // cout << "prev pixel val:\n" << prev.at<cv::Vec3b>(30,30) << endl;
+    //   // cout << "F:\n" << F << endl;
+    //   // cout << "E:\n" << E << endl;
+    //   // cout << "R:\n" << R << endl;
+    //   // cout << "t:\n" << t << endl;
+    // }
 
     // P1 = Matx34d(R(0,0),	R(0,1),	R(0,2),	t(0), R(1,0),	R(1,1),	R(1,2),	t(1), R(2,0),	R(2,1),	R(2,2), t(2));
 
@@ -238,23 +311,21 @@ public:
       circle(out_img, curr_track_indices[i], 3, Scalar(0, 255, 0), -1); // -1 = filled
     }
     imshow(ColorWinName, out_img);
+    // imshow(GrayWinName, prev);
     cv::waitKey(30); // 30 Hz camera = 33.3 ms per callback loop
 
-    prev = curr; // set for next iteration
-    // cout << counter << endl;
+    // THIS ONLY DOES A SHALLOW COPY, WILL BE OVERWRITTEN NEXT TIME I UPDATE CURR
+    // prev = curr; // set for next iteration
+    curr.copyTo(prev); // deep copy, none of that shared pointer stuff
+    // cout << counter  << endl;
     ++counter %= TRAIL_LENGTH;
 
-  } // END OF FUNCTION img_cb()
+  } // END OF FUNCTION img_cb() ################################################
 
 
-  vector<Point2f> normalize(vector<Point2f> coords)
+  vector<Point2f> centerData(vector<Point2f> coords)
   {
-    // vector<int> pointIndexes1;
-    // pointNormalize1= K.inv()*pointIndexes1 where pointIndexes1(2), z is equal 1.
-
-    // vector<Point2f> output(input.size());
-    // int L = input.size();
-    // vector<Point2f> output = *input;
+    // see Lecture 12: Structure From Motion (slide on Factorization: Data Centering)
     int L = coords.size();
 
     float xsum = 0.0;
@@ -274,9 +345,29 @@ public:
     }
 
     return coords; // return input, modified in place
-  } // END OF FUNCTION normalize()
+  } // END OF FUNCTION normalize() #############################################
 
-}; // END OF CLASS FlowCalculator
+
+  vector<Point2f> normalize(vector<Point2f> coords)
+  {
+    // http://stackoverflow.com/questions/25251676/opencv-findfundamentalmat-very-unstable-and-sensitive
+    cv::Matx31d P;
+    cv::Matx31d Pprime;
+    for(vector<Point2f>::iterator it = coords.begin(); it != coords.end(); ++it)
+    {
+      // P[1] = (*it).x;
+      P(0, 0) = (*it).x;
+      P(1, 0) = (*it).y;
+      P(2, 0) = 1; // homogeneous coordinates
+
+      Pprime = camera_matrix.inv() * P;
+      (*it).x = Pprime(0, 0);
+      (*it).y = Pprime(1, 0);
+    }
+    return coords; // return input, modified in place
+  } // END OF FUNCTION normalize() #############################################
+
+}; // END OF CLASS FlowCalculator ##############################################
 
 
 
