@@ -4,6 +4,7 @@
 #include <image_transport/image_transport.h> // for subscribing/publishing image topics
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.h>
+#include <geometry_msgs/Pose2D.h>
 
 #include "opencv2/calib3d/calib3d.hpp"
 // #include "opencv2/videoio.hpp"
@@ -41,8 +42,8 @@ private:
   // set up ROS
   ros::NodeHandle nh_;
   image_transport::ImageTransport it_;
-  image_transport::Subscriber image_sub_;
-  // image_transport::Publisher image_pub_;
+  image_transport::Subscriber image_sub;
+  ros::Publisher pose_pub;
 
   // OpenCV shared variables
   cv::Mat prev;
@@ -79,6 +80,7 @@ private:
   Mat t; // translation matrix
 
   Point2f accumulated;
+  geometry_msgs::Pose2D pose_out;
 
 
 public:
@@ -87,11 +89,11 @@ public:
   {
     std::cout << "instance of FlowCalculator class instantiated" << std::endl;
 
-    // subscribe to input video stream
-    image_sub_ = it_.subscribe("/usb_cam/image_raw", 1, &FlowCalculator::img_cb, this);
+    // subscribe to input video stream from camera
+    image_sub = it_.subscribe("/usb_cam/image_raw", 1, &FlowCalculator::img_cb, this);
 
-    // publish if we want
-    // image_pub_ = it_.advertise("/image_converter/output_video", 1);
+    // publish output pose estimate to EKF
+    pose_pub = nh_.advertise<geometry_msgs::Pose2D>("/optical_flow/pose", 1);
 
     // vector sizes must be declared inside a class method
     // tracking_indices.resize(TRAIL_LENGTH, vector<Point2f>(MAX_INDICES));
@@ -105,6 +107,7 @@ public:
     // GrayWinName = "Gray Output Window";
     // cv::namedWindow(GrayWinName, WINDOW_AUTOSIZE);
 
+    // COULD NOT GET THIS TO WORK, COMPLAINS ABOUT FORMATTING?
     // cv::FileStorage fs;
     // fs.open("/home/njk/Courses/EECS432/Project/ros_ws/src/eecs432_project/calibration/webcam.xml", cv::FileStorage::READ);
     // fs["camera_matrix"] >> camera_matrix;
@@ -318,6 +321,11 @@ public:
     //   ++radius;
     // }
 
+    // package and send output pose to EKF
+    pose_out.x = 0;
+    pose_out.y = 0;
+    pose_out.theta = accumulated.x;
+    pose_pub.publish(pose_out);
 
     // draw tracked points for visualization purposes
     out_img = curr_color; // copy over so we can draw tracked points over top

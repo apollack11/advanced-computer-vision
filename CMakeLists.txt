@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   visualization_msgs
   sensor_msgs
+  geometry_msgs
   image_transport
   cv_bridge
 )
