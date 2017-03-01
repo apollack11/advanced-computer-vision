@@ -20,10 +20,14 @@
 #include <cmath>
 #include <iomanip> // std::setw
 #include <typeinfo>
+#include <algorithm>
+#include <functional> // std::transform
 
-
-#define MAX_INDICES 200
-#define TRAIL_LENGTH 30
+#define MAX_INDICES 200 // # of points to track w/ optical flow
+#define TRAIL_LENGTH 30 // not currently being used for any real purposes
+// #define CAM_ANGLE_U 31.67 // degrees subtended by camera in u direction (wider of the two)
+// #define CAM_ANGLE_U 0.5527 // radians subtended by camera in u direction (wider of the two)
+#define PIX_ANGLE_U 0.0008637 // radians subtended by each pixel in u direction (wider of the two)
 
 
 using namespace std;
@@ -73,6 +77,8 @@ private:
   Matx34d P1;
   Mat R; // rotation matrix
   Mat t; // translation matrix
+
+  Point2f accumulated;
 
 
 public:
@@ -128,6 +134,8 @@ public:
     float projection_matrix_data[12] = {1160.519653, 0, 349.420934, 0, 0, 1164.307007, 275.445505, 0, 0, 0, 1, 0};
     projection_matrix = cv::Mat(3, 4, CV_32F, projection_matrix_data);
 
+    accumulated = Point2f(0.0, 0.0);
+
   } // END OF CONSTRUCTOR ######################################################
 
 
@@ -174,10 +182,20 @@ public:
 
     // find optical flow between previous and current images, store in curr_track_indices
     calcOpticalFlowPyrLK(prev, curr, prev_track_indices, curr_track_indices, flow_status, flow_errs);
-    cout << "prev_track_indices:\n" << prev_track_indices << endl;
-    cout << "curr_track_indices:\n" << curr_track_indices << endl;
+    // cout << "prev_track_indices:\n" << prev_track_indices << endl;
+    // cout << "curr_track_indices:\n" << curr_track_indices << endl;
     // cout << "prev_track_indices POINT TYPE:\n" << typeid(prev_track_indices[0]).name() << endl;
     // cout << "prev_track_indices POINT 0 X:\n" << prev_track_indices[0].x << endl;
+
+    // NOT SURE WE NEED THIS CHECK, BUT ONE OF MY CUSTOM FUNCTIONS STATES WE HAVE IT:
+    if(curr_track_indices.size() != prev_track_indices.size())
+    { ROS_ERROR("tracking index data size different between previous and current images"); }
+
+    Point2f derp = uv_left_right(prev_track_indices, curr_track_indices);
+    accumulated += derp * PIX_ANGLE_U * 57.29;
+    // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
+    cout << "accumulated u, v = " << setw(12) << accumulated.x << ", " << setw(12) << accumulated.y << endl;
+
 
 
     // undistort image (before calculating Fundamental Matrix) - turns out to be too laggy
@@ -192,20 +210,17 @@ public:
     // undistorting using built-in function isn't workint, try homebrew solution instead:
     prev_track_undistorted = normalize(prev_track_indices);
     curr_track_undistorted = normalize(curr_track_indices);
-    cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
-    cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
+    // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
+    // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
 
     // center data per Wu's lecture 12
     // prev_track_centered = centerData(prev_track_indices);
     // curr_track_centered = centerData(curr_track_indices);
     prev_track_centered = centerData(prev_track_undistorted);
     curr_track_centered = centerData(curr_track_undistorted);
-    cout << "prev_track_centered:\n" << prev_track_centered << endl;
-    cout << "curr_track_centered:\n" << curr_track_centered << endl;
+    // cout << "prev_track_centered:\n" << prev_track_centered << endl;
+    // cout << "curr_track_centered:\n" << curr_track_centered << endl;
 
-    // NOT SURE WE NEED THIS CHECK:
-    if(curr_track_indices.size() != prev_track_indices.size())
-    { ROS_ERROR("tracking index data size different between previous and current images"); }
 
     // syntax inspiration found at:
     // http://www.morethantechnical.com/2012/02/07/structure-from-motion-and-3d-reconstruction-on-the-easy-in-opencv-2-3-w-code/
@@ -222,23 +237,23 @@ public:
     // that sucked too, how about this?:
     // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_8POINT, 1, 0.99, flow_status);
       // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 1, 0.99, flow_status);
-      F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 0.01, 0.99, flow_status); // 0.01 is guess
-    //   cout << "F:\n" << F << endl;
-    // }
-
-    E = camera_matrix.t() * F * camera_matrix; // calculate essential matrix from fundamental matrix and camera matrix
-
-    // helpful clarification:
-    // http://stackoverflow.com/questions/16639106/camera-motion-from-corresponding-images
-    SVD svd(E);
-    R = svd.u * Mat(W) * svd.vt;
-    t = svd.u.col(2);
-    cout << "R:\n" << R << '\n' << endl;
-
+    //   F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 0.01, 0.99, flow_status); // 0.01 is guess
+    // //   cout << "F:\n" << F << endl;
+    // // }
+    //
+    // E = camera_matrix.t() * F * camera_matrix; // calculate essential matrix from fundamental matrix and camera matrix
+    //
+    // // helpful clarification:
+    // // http://stackoverflow.com/questions/16639106/camera-motion-from-corresponding-images
+    // SVD svd(E);
+    // R = svd.u * Mat(W) * svd.vt;
+    // t = svd.u.col(2);
+    // cout << "R:\n" << R << '\n' << endl;
+    //
     // double roll = atan2(R.at<float>(2, 1), R.at<float>(2, 2));
     // double pitch = asin(R.at<float>(2, 0));
     // double yaw = -atan2(R.at<float>(1, 0), R.at<float>(0, 0));
-    //
+    // //
     // cout << "RPY: " << setw(15) << roll << setw(15) << pitch << setw(15) << yaw << endl;
 
     // if(!(counter%15)) // every 1/2 second, print:
@@ -366,6 +381,51 @@ public:
     }
     return coords; // return input, modified in place
   } // END OF FUNCTION normalize() #############################################
+
+
+  Point2f uv_left_right(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
+  {
+    // function to calculate the average (u, v) coordinate change from
+    // frame-to-frame, used to estimate camera motion relative to world
+    int L = prev_coords.size();
+    float xsum = 0.0;
+    float ysum = 0.0;
+
+    vector<Point2f>::iterator it1 = prev_coords.begin(); // sizes should already
+    vector<Point2f>::iterator it2 = curr_coords.begin(); // be verified equal
+    for( ; it2 != curr_coords.end(); ++it1, ++it2)
+    {
+      xsum += (*it2).x - (*it1).x;
+      ysum += (*it2).y - (*it1).y;
+    }
+
+    // calc average left/right tracked point movement
+    // also apply deadband of 1 pixel, so we don't accrue unnecessary error
+    float xavg = (abs(xsum/L) > 1 ? xsum/L : 0);
+    float yavg = (abs(ysum/L) > 1 ? ysum/L : 0);
+
+    return Point2f(xavg, yavg);
+  } // END OF FUNCTION uv_left_right() #########################################
+
+
+  Point2f uv_fore_aft(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
+  {
+    // function to calculate the average (u, v) coordinate change from
+    // frame-to-frame, used to estimate camera motion relative to world
+    int L = prev_coords.size();
+    float xsum = 0.0;
+    float ysum = 0.0;
+
+    vector<Point2f>::iterator it1 = prev_coords.begin(); // sizes should already
+    vector<Point2f>::iterator it2 = curr_coords.begin(); // be verified equal
+    for( ; it2 != curr_coords.end(); ++it1, ++it2)
+    {
+      xsum += (*it2).x - (*it1).x;
+      ysum += (*it2).y - (*it1).y;
+    }
+
+    return Point2f(xsum/L, ysum/L);
+  } // END OF FUNCTION uv_fore_aft() ###########################################
 
 }; // END OF CLASS FlowCalculator ##############################################
 
