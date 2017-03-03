@@ -2,6 +2,8 @@
 // #include <ros/console.h>
 
 #include <image_transport/image_transport.h> // for subscribing/publishing image topics
+#include "compressed_image_transport/compressed_subscriber.h"
+#include "compressed_image_transport/compression_common.h"
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.h>
 #include <geometry_msgs/Pose2D.h>
@@ -11,21 +13,23 @@
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/features2d/features2d.hpp"
-#include <opencv2/nonfree/features2d.hpp> // SurfFeatureDetector
+// #include <opencv2/nonfree/features2d.hpp> // SurfFeatureDetector
 #include <opencv2/legacy/legacy.hpp> // BruteForceMatcher
 #include <opencv2/video/tracking.hpp> // estimateRigidTransform
 // #include "opencv2/xfeatures2d.hpp"
 #include <iostream>
 // #include <list>
 #include <vector>
-#include <cmath>
+#include <cmath> // sqrt
 #include <iomanip> // std::setw
 #include <typeinfo>
 #include <algorithm>
 #include <functional> // std::transform
 
-#define MAX_INDICES 200 // # of points to track w/ optical flow
+#define MAX_INDICES 300 // # of points to track w/ optical flow
 #define TRAIL_LENGTH 30 // not currently being used for any real purposes
+#define CAM_WIDTH 640 // pixels
+#define CAM_HEIGHT 480 // pixels
 // #define CAM_ANGLE_U 31.67 // degrees subtended by camera in u direction (wider of the two)
 // #define CAM_ANGLE_U 0.5527 // radians subtended by camera in u direction (wider of the two)
 #define PIX_ANGLE_U 0.0008637 // radians subtended by each pixel in u direction (wider of the two)
@@ -80,6 +84,7 @@ private:
   Mat t; // translation matrix
 
   Point2f accumulated;
+  float accumulated2;
   geometry_msgs::Pose2D pose_out;
 
 
@@ -90,7 +95,8 @@ public:
     std::cout << "instance of FlowCalculator class instantiated" << std::endl;
 
     // subscribe to input video stream from camera
-    image_sub = it_.subscribe("/usb_cam/image_raw", 1, &FlowCalculator::img_cb, this);
+    image_sub = it_.subscribe("/usb_cam/image_raw", 1, &FlowCalculator::img_cb, this, image_transport::TransportHints("compressed"));
+    // image_sub = it_.subscribe("/camera/image_color", 1, &FlowCalculator::img_cb, this, image_transport::TransportHints("compressed"));
 
     // publish output pose estimate to EKF
     pose_pub = nh_.advertise<geometry_msgs::Pose2D>("/optical_flow/pose", 1);
@@ -100,7 +106,7 @@ public:
     // tracking_indices.resize(MAX_INDICES, vector<Point2f>(TRAIL_LENGTH));
     counter = 0;
 
-    // create a single window instance, overwrite as needed
+    // create a single window instance, overwrite each loop
     ColorWinName = "Color Output Window";
     cv::namedWindow(ColorWinName, WINDOW_AUTOSIZE);
 
@@ -152,6 +158,8 @@ public:
   void img_cb(const sensor_msgs::ImageConstPtr& input)
   {
     // grab the current frame from the camera stream
+    // cout << "did i make it here?" << endl;
+
     try
     {
       in_ptr = cv_bridge::toCvCopy(input, sensor_msgs::image_encodings::BGR8);
@@ -162,19 +170,25 @@ public:
       return;
     }
 
-    curr_color = in_ptr->image; // will use the color version later (for output)
+    curr_color = in_ptr->image; // copy over since we use the color version later (for output)
     cv::cvtColor(curr_color, curr, CV_BGR2GRAY); // create curr (grayscale version of the input)
 
-
-    if(!prev.data) // Check for invalid input
+    if(!prev.data) // Check for invalid input, also handles 1st time being called
     {
-      ROS_WARN("prev data not available, assigning to curr data");
+      ROS_WARN("prev image data not available, assigning to curr data");
       curr.copyTo(prev); // deep copy, none of that shared pointer stuff
       return;
     }
 
-    // create vector of good points to track from previous image
-    goodFeaturesToTrack(prev, prev_track_indices, MAX_INDICES, 0.2, 0.0);
+    if(prev_track_indices.size() < 0.75*MAX_INDICES) // if we lose enough tracking indices, calculate a new set
+    {
+      // create vector of good points to track from previous image
+      goodFeaturesToTrack(prev, prev_track_indices, MAX_INDICES, 0.1, 2.0);
+      // cout << "prev_track_indices.size(): " << prev_track_indices.size() << endl;
+    }
+    // cout << "prev_track_indices.size(): " << prev_track_indices.size() << endl;
+
+
 
     if(prev_track_indices.empty()) // check
     {
@@ -184,20 +198,26 @@ public:
     }
 
     // find optical flow between previous and current images, store in curr_track_indices
-    calcOpticalFlowPyrLK(prev, curr, prev_track_indices, curr_track_indices, flow_status, flow_errs);
+    // TRY USING PYRAMIDS INSTEAD? I THINK calcOpticalFlowPyrLK ALREADY USES PYRAMIDS, JUST CREATES THEM AUTOMATICALLY INSTEAD OF ME DOING THEM FIRST, GIVING ME LESS CONTROL OVER PARAMETERS
+    calcOpticalFlowPyrLK(prev, curr, prev_track_indices, curr_track_indices, flow_status, flow_errs, Size(21,21), 4);
+    calcOpticalFlowFarneback(prevgray, img, flowUmat, 0.4, 1, 12, 2, 8, 1.2, 0);
+
+
     // cout << "prev_track_indices:\n" << prev_track_indices << endl;
     // cout << "curr_track_indices:\n" << curr_track_indices << endl;
-    // cout << "prev_track_indices POINT TYPE:\n" << typeid(prev_track_indices[0]).name() << endl;
-    // cout << "prev_track_indices POINT 0 X:\n" << prev_track_indices[0].x << endl;
 
     // NOT SURE WE NEED THIS CHECK, BUT ONE OF MY CUSTOM FUNCTIONS STATES WE HAVE IT:
     if(curr_track_indices.size() != prev_track_indices.size())
     { ROS_ERROR("tracking index data size different between previous and current images"); }
 
     Point2f derp = uv_left_right(prev_track_indices, curr_track_indices);
-    accumulated += derp * PIX_ANGLE_U * 57.29;
+    accumulated += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
     // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
     cout << "accumulated u, v = " << setw(12) << accumulated.x << ", " << setw(12) << accumulated.y << endl;
+
+    // float derp2 = uv_fore_aft(prev_track_indices, curr_track_indices);
+    // accumulated2 += derp2;
+    // cout << "accumulated z (sort of) = " << setw(12) << accumulated2 << endl;
 
 
 
@@ -223,6 +243,12 @@ public:
     curr_track_centered = centerData(curr_track_undistorted);
     // cout << "prev_track_centered:\n" << prev_track_centered << endl;
     // cout << "curr_track_centered:\n" << curr_track_centered << endl;
+
+    // DOING THIS AFTER UNDISTORTING THROWS OFF RESULTS (SINCE POINTS ARE NOW IN CAM COORDS INSTEAD OF PIXELS)
+    // Point2f derp = uv_left_right(prev_track_undistorted, curr_track_undistorted);
+    // accumulated += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
+    // // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
+    // cout << "accumulated u, v = " << setw(12) << accumulated.x << ", " << setw(12) << accumulated.y << endl;
 
 
     // syntax inspiration found at:
@@ -340,10 +366,67 @@ public:
     // THIS ONLY DOES A SHALLOW COPY, WILL BE OVERWRITTEN NEXT TIME I UPDATE CURR
     // prev = curr; // set for next iteration
     curr.copyTo(prev); // deep copy, none of that shared pointer stuff
-    // cout << counter  << endl;
+
+    prev_track_indices = curr_track_indices; // deep copy, MAKE SURE TO COMMENT OUT IF I REVERT TO CALLING goodFeaturesToTrack EACH LOOP
+    // this function emulates std::remove_if, which is technically only available
+    // in c++ version 11 or greater, and also does not work with OpenCV types
+    vector<Point2f>::iterator first = prev_track_indices.begin();
+    vector<Point2f>::iterator new_start = first;
+    vector<Point2f>::iterator last = prev_track_indices.end();
+    // for(vector<Point2f>::iterator it = prev_track_indices.begin(), it != prev_track_indices.end(), ++it)
+    while(first!=last)
+    // cout << "made it here" << endl;
+    {
+      if ((*first).x < 0.0 || (*first).x > CAM_WIDTH || (*first).y < 0.0 || (*first).y > CAM_HEIGHT)
+      {
+        // cout << "made it into the mystical for loop!" << endl;
+        // cout << "swapping this:" << *new_start;
+        // *new_start = *first;
+        prev_track_indices.erase(first);
+        //
+        // cout << " and this:" << *new_start << endl;
+        // ++new_start;
+      }
+      ++first;
+      // return new_start;
+    }
+    // cout << "made it here" << endl;
+
+    prev_track_indices.begin() = new_start;
+
+    // prev_track_indices.erase(std::remove_if(prev_track_indices.begin(), prev_track_indices.end(), [](const Point2f &P) {return P.x > P.x < 0 || CAM_WIDTH || P.y < 0 || P.y > CAM_HEIGHT;}), prev_track_indices.end()); // put your condition here
+
     ++counter %= TRAIL_LENGTH;
 
   } // END OF FUNCTION img_cb() ################################################
+
+
+
+// ForwardIterator remove_if (ForwardIterator first, ForwardIterator last, UnaryPredicate pred)
+// {
+//   ForwardIterator result = first;
+//   while (first!=last)
+//   {
+//     if (!pred(*first))
+//     {
+//       *result = *first;
+//       ++result;
+//     }
+//     ++first;
+//   }
+//   return result;
+// }
+
+
+
+
+
+
+
+
+
+
+
 
 
   vector<Point2f> centerData(vector<Point2f> coords)
@@ -368,7 +451,7 @@ public:
     }
 
     return coords; // return input, modified in place
-  } // END OF FUNCTION normalize() #############################################
+  } // END OF FUNCTION centerData() ############################################
 
 
   vector<Point2f> normalize(vector<Point2f> coords)
@@ -378,7 +461,6 @@ public:
     cv::Matx31d Pprime;
     for(vector<Point2f>::iterator it = coords.begin(); it != coords.end(); ++it)
     {
-      // P[1] = (*it).x;
       P(0, 0) = (*it).x;
       P(1, 0) = (*it).y;
       P(2, 0) = 1; // homogeneous coordinates
@@ -388,6 +470,16 @@ public:
       (*it).y = Pprime(1, 0);
     }
     return coords; // return input, modified in place
+
+    // TRIED THIS BUT DON'T FEEL LIKE WASTING TIME WHEN I ALREADY HAVE A SOLUTION
+    // vector<Point3f> homogeneous_coords;
+    // convertPointsToHomogeneous(coords, homogeneous_coords);
+    // for(vector<Point3f>::iterator it = homogeneous_coords.begin(); it != homogeneous_coords.end(); ++it)
+    // {
+    //   *it = camera_matrix.inv() * (*it);
+    // }
+    // cout << "homogeneous_coords:\n" << homogeneous_coords << endl;
+    // would still have to run convertPointsFromHomogeneous() to get 2D point back
   } // END OF FUNCTION normalize() #############################################
 
 
@@ -416,23 +508,94 @@ public:
   } // END OF FUNCTION uv_left_right() #########################################
 
 
-  Point2f uv_fore_aft(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
+  float uv_fore_aft(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
   {
-    // function to calculate the average (u, v) coordinate change from
-    // frame-to-frame, used to estimate camera motion relative to world
+    // function to calculate the z coordinate change from frame-to-frame
+    // used to estimate camera motion relative to world
+    // int top = CAM_HEIGHT * 2/3;
+    // int bot = CAM_HEIGHT * 1/3; // ignoring middle 1/3 of image
+    // int top_count = 0;
+    // int bot_count = 0;
+    //
+    // int L = prev_coords.size();
+    // float ysum_top = 0.0;
+    // float ysum_bot = 0.0;
+    //
+    // float y_prev;
+    // vector<Point2f>::iterator it1 = prev_coords.begin(); // sizes should already
+    // vector<Point2f>::iterator it2 = curr_coords.begin(); // be verified equal
+    // for( ; it2 != curr_coords.end(); ++it1, ++it2)
+    // {
+    //   // loop through and find y-component of motion for all matching points
+    //   y_prev = (*it1).y;
+    //   if(y_prev < bot)
+    //   {
+    //     ysum_bot += (*it2).y - (*it1).y;
+    //     ++bot_count;
+    //   }
+    //   else if(y_prev > top)
+    //   {
+    //     ysum_top += (*it2).y - (*it1).y;
+    //     ++top_count;
+    // if(top_count < 15 || bot_count < 15)
+    // {
+    //   return Point2f(0.0, 0.0); // not enough valid points to get a good average
+    // }
+    // else
+    // {
+    //   float y_avg = ysum_bot/bot_count - ysum_top/top_count;
+    //   return Point2f(0.0, y_avg);
+    // }
+
+
+
+
+    // DO RADIAL INSTEAD OF TOP/BOT
+    // DO RADIAL INSTEAD OF TOP/BOT
+    // DO RADIAL INSTEAD OF TOP/BOT
+    // DO RADIAL INSTEAD OF TOP/BOT
+
     int L = prev_coords.size();
-    float xsum = 0.0;
-    float ysum = 0.0;
+
+    float x_prev;
+    float y_prev;
+    float x_curr;
+    float y_curr;
+    float x_mid;
+    float y_mid;
+
+    double vnorm;
+    float x_radial;
+    float y_radial;
+    double x_rad_tot = 0;
+    double y_rad_tot = 0;
+    // Point2f mid;
+    // Point2f dir;
+    // cv::Mat mid1,2,CV_32FC1,a);
+    // cv::Mat BB(1,2,CV_32FC1,b);
+
 
     vector<Point2f>::iterator it1 = prev_coords.begin(); // sizes should already
     vector<Point2f>::iterator it2 = curr_coords.begin(); // be verified equal
     for( ; it2 != curr_coords.end(); ++it1, ++it2)
     {
-      xsum += (*it2).x - (*it1).x;
-      ysum += (*it2).y - (*it1).y;
-    }
+      // loop through and find y-component of motion for all matching points
+      x_prev = (*it1).x;
+      y_prev = (*it1).y;
+      x_curr = (*it2).x;
+      y_curr = (*it2).y;
+      x_mid = (x_curr - x_prev)/2;
+      y_mid = (y_curr - y_prev)/2;
+      vnorm = sqrt(pow(x_mid - CAM_WIDTH/2, 2) + pow(y_mid - CAM_HEIGHT/2, 2));
 
-    return Point2f(xsum/L, ysum/L);
+      x_rad_tot += (2 * x_mid) * (x_mid - CAM_WIDTH/2)/vnorm;
+      y_rad_tot += (2 * y_mid) * (y_mid - CAM_HEIGHT/2)/vnorm;
+    }
+    // rad_tot = sqrt(pow(x_rad_tot, 2) + pow(y_rad_tot, 2));
+
+    // return rad_tot;
+    return sqrt(pow(x_rad_tot, 2) + pow(y_rad_tot, 2));
+
   } // END OF FUNCTION uv_fore_aft() ###########################################
 
 }; // END OF CLASS FlowCalculator ##############################################
@@ -442,6 +605,7 @@ public:
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "dontknowwhattocallthisnode");
+  // ros::param::set("_image_transport", "compressed");
   FlowCalculator fc;
   ros::spin();
   return 0;
