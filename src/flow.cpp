@@ -10,7 +10,7 @@
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/features2d/features2d.hpp"
-#include <opencv2/nonfree/features2d.hpp> // SurfFeatureDetector
+// #include <opencv2/nonfree/features2d.hpp> // SurfFeatureDetector
 #include <opencv2/legacy/legacy.hpp> // BruteForceMatcher
 #include <opencv2/video/tracking.hpp> // estimateRigidTransform
 // #include "opencv2/xfeatures2d.hpp"
