@@ -47,7 +47,7 @@ private:
   image_transport::Subscriber image_sub;
   ros::Publisher pose_pub;
 
-  // images and indices:
+  // image structures and indices:
   cv::Mat curr_color;
   cv::Mat curr;
   cv::Mat prev;
@@ -65,35 +65,28 @@ private:
   cv::Matx33d F; // Fundamental Matrix
   cv::Matx33d E; // Essential Matrix
 
-
-
   // setup and generic stuff:
   int counter;
-  // vector<vector<Point2f> > tracking_indices;
-  // vector<vector<Point2f> >::iterator trail_it;
   string ColorWinName;
   string GrayWinName;
-  cv_bridge::CvImagePtr in_ptr;
-
+  Mat out_img; // output image, marked up with flow points and stuff
 
   // camera calibration data:
-  cv::Matx33d camera_matrix; // Camera Matrix (from camera calibration file)
-  cv::Mat distortion_coefficients; // distorition coefficients (from camera calibration file)
-  cv::Mat rectification_matrix; // rectification matrix coefficients (from camera calibration file)
-  cv::Mat projection_matrix; // projection matrix coefficients (from camera calibration file)
-  Mat out_img; // output image, marked up with flow points and stuff
-  Matx33d W;
-  Matx33d Winv;
-  Matx34d P1;
+  cv::Matx33d camera_matrix; // Camera Matrix (from calibration file)
+  cv::Mat distortion_coefficients; // distortion coefficients (from calibration file)
+  cv::Mat rectification_matrix; // rectification matrix (from calibration file)
+  cv::Mat projection_matrix; // projection matrix (from calibration file)
+  Mat W; // multiview geometry eqn 9.13, H&Z
   Mat R; // rotation matrix
-  Mat t; // translation matrix
+  Mat t; // translation vector
 
-  Point2f accumulated;
-  float accumulated2;
+  // containers for output and motion estimate values:
+  Point2f accumulated_xy;
+  float accumulated_z;
   geometry_msgs::Pose2D pose_out;
 
-  Mat prev_track_indices_mat; // testing for Farneback's instead of LK
-  Mat curr_track_indices_mat; // testing for Farneback's instead of LK
+  // testing out Farneback's instead of LK to solve OF:
+  Mat curr_track_indices_mat;
 
 
 public:
@@ -109,41 +102,19 @@ public:
     // publish output pose estimate to EKF
     pose_pub = nh_.advertise<geometry_msgs::Pose2D>("/optical_flow/pose", 1);
 
-    // vector sizes must be declared inside a class method
-    // tracking_indices.resize(TRAIL_LENGTH, vector<Point2f>(MAX_INDICES));
-    // tracking_indices.resize(MAX_INDICES, vector<Point2f>(TRAIL_LENGTH));
-    counter = 0;
-
     // create a single window instance, overwrite each loop
     ColorWinName = "Color Output Window";
     cv::namedWindow(ColorWinName, WINDOW_AUTOSIZE);
 
-    // GrayWinName = "Gray Output Window";
-    // cv::namedWindow(GrayWinName, WINDOW_AUTOSIZE);
-
-    // COULD NOT GET THIS TO WORK, COMPLAINS ABOUT FORMATTING?
-    // cv::FileStorage fs;
-    // fs.open("/home/njk/Courses/EECS432/Project/ros_ws/src/eecs432_project/calibration/webcam.xml", cv::FileStorage::READ);
-    // fs["camera_matrix"] >> camera_matrix;
-    // cout << "camera_matrix:\n" << camera_matrix << endl;
-    // fs.release();
-
-    // hack for now since can't initialize the way I want to
-    // cv::Matx33d ktmp(0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
-    cv::Matx33d ktmp(1149.322298, 0.0, 351.778662, 0.0, 1151.593614, 276.459807, 0.0, 0.0, 1.0);
-    camera_matrix = ktmp;
-
-    // cv::Mat_ dtmp(-0.073669, 1.170392, 0.000976, -0.00244, 0.0);
-    // distortion_coefficients = dtmp;
+    // hack these for now since can't initialize the way I want to (stupid pre-c++11!)
+    float camera_matrix_data[9] = {1149.322298, 0.0, 351.778662, 0.0, 1151.593614, 276.459807, 0.0, 0.0, 1.0};
+    camera_matrix = cv::Mat(3, 3, CV_64F, camera_matrix_data);
 
     float distortion_coefficients_data[5] = {-0.073669, 1.170392, 0.000976, -0.00244, 0.0};
     distortion_coefficients = cv::Mat(1, 5, CV_32F, distortion_coefficients_data);
 
-    Matx33d Wtmp(0, -1, 0, 1, 0, 0, 0, 0, 1);
-    W = Wtmp;
-
-    Matx33d Winvtmp(0, 1, 0, -1, 0, 0, 0, 0, 1);
-    Winv = Winvtmp;
+    float Wtmp_data[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    W = cv::Mat(3, 3, CV_64F, Wtmp_data);
 
     float rectification_matrix_data[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     rectification_matrix = cv::Mat(3, 3, CV_32F, rectification_matrix_data);
@@ -151,7 +122,10 @@ public:
     float projection_matrix_data[12] = {1160.519653, 0, 349.420934, 0, 0, 1164.307007, 275.445505, 0, 0, 0, 1, 0};
     projection_matrix = cv::Mat(3, 4, CV_32F, projection_matrix_data);
 
-    accumulated = Point2f(0.0, 0.0);
+    accumulated_xy = Point2f(0.0, 0.0);
+    accumulated_z = 0;
+
+    counter = 0;
 
   } // END OF CONSTRUCTOR ######################################################
 
@@ -165,12 +139,9 @@ public:
 
   void img_cb(const sensor_msgs::ImageConstPtr& input)
   {
-    // grab the current frame from the camera stream
-    // cout << "did i make it here?" << endl;
-
+    // grab current frame from camera stream
     try
     {
-      // in_ptr = cv_bridge::toCvCopy(input, sensor_msgs::image_encodings::BGR8);
       curr_color = (cv_bridge::toCvCopy(input, sensor_msgs::image_encodings::BGR8))->image;
     }
     catch (cv_bridge::Exception& e)
@@ -178,9 +149,7 @@ public:
       ROS_ERROR("cv_bridge exception: %s", e.what());
       return;
     }
-
-    // curr_color = in_ptr->image; // copy over since we use the color version later (for output)
-    cv::cvtColor(curr_color, curr, CV_BGR2GRAY); // create curr (grayscale version of the input)
+    cv::cvtColor(curr_color, curr, CV_BGR2GRAY); // create curr (grayscale version of the input image)
 
     if(!prev.data) // Check for invalid input, also handles 1st time being called
     {
@@ -197,14 +166,11 @@ public:
     if(prev_track_indices.size() < 0.75*MAX_INDICES) // if enough tracking indices are dropped, calculate a new set
     {
       // create vector of good points to track from previous image
-      goodFeaturesToTrack(prev, prev_track_indices, MAX_INDICES, 0.05, 8.0);
-      // cout << "prev_track_indices.size(): " << prev_track_indices.size() << endl;
+      goodFeaturesToTrack(prev, prev_track_indices, MAX_INDICES, 0.05, 5.0);
     }
     // cout << "prev_track_indices.size(): " << prev_track_indices.size() << endl;
 
-
-
-    if(prev_track_indices.empty()) // check
+    if(prev_track_indices.empty()) // check, even though we shouldn't have this problem
     {
       ROS_WARN("no tracking objects found");
       curr.copyTo(prev); // deep copy, none of that shared pointer stuff
@@ -214,8 +180,6 @@ public:
     // find optical flow between previous and current images, store in curr_track_indices
     // TRY USING PYRAMIDS INSTEAD? I THINK calcOpticalFlowPyrLK ALREADY USES PYRAMIDS, JUST CREATES THEM AUTOMATICALLY INSTEAD OF ME DOING THEM FIRST, GIVING ME LESS CONTROL OVER PARAMETERS
     calcOpticalFlowPyrLK(prev, curr, prev_track_indices, curr_track_indices, flow_status, flow_errs, Size(21,21), 4);
-
-
     // cout << "prev_track_indices:\n" << prev_track_indices << endl;
     // cout << "curr_track_indices:\n" << curr_track_indices << endl;
 
@@ -224,75 +188,32 @@ public:
     { ROS_ERROR("tracking index data size different between previous and current images"); }
 
     Point2f derp = uv_left_right(prev_track_indices, curr_track_indices);
-    accumulated += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
-    // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
+    accumulated_xy += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
 
     float derp2 = uv_fore_aft(prev_track_indices, curr_track_indices);
-    accumulated2 += derp2;
-    // cout << "accumulated z (sort of) = " << setw(12) << accumulated2 << endl;
+    accumulated_z += derp2;
 
     // if(derp.x != 0 || derp.y != 0 || derp2 > 0.1)
     // {
-    //   cout << "(#=" << prev_track_indices.size() << ")\tyaw, pitch, z_trans = " << setw(12) << accumulated.x << ", " << setw(12) << accumulated.y << ", " << setw(12) << accumulated2 << endl;
+    //   cout << "(#=" << prev_track_indices.size() << ")\tyaw, pitch, z_trans = " << setw(12) << accumulated_xy.x << ", " << setw(12) << accumulated_xy.y << ", " << setw(12) << accumulated_z << endl;
     // }
-
-
-    // undistort image (before calculating Fundamental Matrix) - turns out to be too laggy
-    // try undistorting only tracked points instead (before calculating Fundamental Matrix)
-    // http://stackoverflow.com/questions/25251676/opencv-findfundamentalmat-very-unstable-and-sensitive
-    // undistortPoints(curr_track_indices, curr_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
-    // undistortPoints(prev_track_indices, prev_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
-    // DOES THIS WORK WITH INDICES OR ACTUAL POINT DATA???? SHOULD BE INDICES, BUT GETTING NANS
-    // The function can be used for both a stereo camera head or a monocular camera (when R is empty).
-    // ^ DOES THIS MEAN I SHOULDN'T BE USIN R OR P (rectification_matrix OR projection_matrix)?
-
-    // undistorting using built-in function isn't working, try homebrew solution instead:
-    // prev_track_undistorted = normalize(prev_track_indices);
-    // curr_track_undistorted = normalize(curr_track_indices);
-    // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
-    // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
-
-    // center data per Wu's lecture 12
-    // prev_track_centered = centerData(prev_track_indices);
-    // curr_track_centered = centerData(curr_track_indices);
-    // prev_track_centered = centerData(prev_track_undistorted);
-    // curr_track_centered = centerData(curr_track_undistorted);
-    // cout << "prev_track_centered:\n" << prev_track_centered << endl;
-    // cout << "curr_track_centered:\n" << curr_track_centered << endl;
-
-    // DOING THIS AFTER UNDISTORTING THROWS OFF RESULTS (SINCE POINTS ARE NOW IN CAM COORDS INSTEAD OF PIXELS)
-    // Point2f derp = uv_left_right(prev_track_undistorted, curr_track_undistorted);
-    // accumulated += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
-    // // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
-    // cout << "accumulated u, v = " << setw(12) << accumulated.x << ", " << setw(12) << accumulated.y << endl;
-
-
-    // syntax inspiration found at:
-    // http://www.morethantechnical.com/2012/02/07/structure-from-motion-and-3d-reconstruction-on-the-easy-in-opencv-2-3-w-code/
 
     // comparison of findFundamentalMat solver techniques:
     // http://fhtagn.net/prog/2012/09/27/opencv-fundamentalmat.html
     // per this, may be better to use LMedS instead of RANSAC...
-    // F = findFundamentalMat(prev_track_indices, curr_track_undistorted, FM_RANSAC, 1, 0.99, F_indices_mask);
     F = findFundamentalMat(prev_track_indices, curr_track_indices, FM_RANSAC, 1, 0.99, flow_status);
-    // ransac sucks, how about this?:
-    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_LMEDS, 1, 0.99, F_indices_mask);
-    // that sucked too, how about this?:
-    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_8POINT, 1, 0.99, F_indices_mask);
-    // welp, they all suck. back to the drawing board
-    // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 1, 0.99, F_indices_mask);
-    // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 0.01, 0.99, F_indices_mask); // 0.01 is guess
-    // cout << "F:\n" << F << endl;
-    //
-    E = camera_matrix.t() * F * camera_matrix; // calculate essential matrix from fundamental matrix and camera matrix
-    //
-    // // helpful clarification:
-    // // http://stackoverflow.com/questions/16639106/camera-motion-from-corresponding-images
+    E = camera_matrix.t() * F * camera_matrix; // calculate Essential matrix from Fundamental matrix and camera matrix
+
+    // helpful clarification:
+    // http://stackoverflow.com/questions/16639106/camera-motion-from-corresponding-images
+
+    // syntax inspiration found at:
+    // http://www.morethantechnical.com/2012/02/07/structure-from-motion-and-3d-reconstruction-on-the-easy-in-opencv-2-3-w-code/
     SVD svd(E);
     R = svd.u * Mat(W) * svd.vt;
     t = svd.u.col(2);
     // cout << "R:\n" << R << '\n' << endl;
-    //
+
     double roll = atan2(R.at<float>(2, 1), R.at<float>(2, 2));
     double pitch = asin(R.at<float>(2, 0));
     double yaw = -atan2(R.at<float>(1, 0), R.at<float>(0, 0));
@@ -303,7 +224,6 @@ public:
       // cout << "RPY: " << setw(15) << roll << setw(15) << pitch << setw(15) << yaw << endl;// '\t' << R.type() << endl;
       cout << "R:\n" << R << '\n' << endl;
     }
-
 
     // if(!(counter%15)) // every 1/2 second, print:
     // {
@@ -322,55 +242,10 @@ public:
     //   cout << "t:\n" << t << endl;
     // }
 
-    // P1 = Matx34d(R(0,0),	R(0,1),	R(0,2),	t(0), R(1,0),	R(1,1),	R(1,2),	t(1), R(2,0),	R(2,1),	R(2,2), t(2));
-
-
-    // cout << "curr_track_indices:\n" << curr_track_indices << endl;
-
-
-    // troubleshooting, check if F is right:
-    // for(int k = 0; k < 5; ++k)
-    // {
-    //   int x1 = prev_track_indices[k].x;
-    //   int y1 = prev_track_indices[k].y;
-    //   int x2 = curr_track_indices[k].x;
-    //   int y2 = curr_track_indices[k].y;
-    //
-    //   Matx13d xp(x1, y1, 1);
-    //   Matx31d x(x2, y2, 1);
-    //
-    //   cout << k << '\t' << xp * F * x << endl; // this should be 0 if F is right
-    // }
-
-
-
-// THIS SECTION WAS SUPPOSED TO DRAW TRAILS BEHIND THE TRACKED POINTS
-// IT WORKS, BUT I IMPLEMENTED IT AS DECAYING POINTS INSTEAD
-// (SINCE THE POINTS MIGHT OTHERWISE JUMP AROUND)
-    // tracking_indices[counter] = curr_track_indices;
-    // int radius = TRAIL_LENGTH;
-    // int radius = 0;
-    // for(trail_it = tracking_indices.begin(); trail_it != tracking_indices.end(); ++trail_it)
-    // {
-    //   // draw line endpoints for visualization purposes
-    //   for(vector<Point2f>::iterator it = (*trail_it).begin(); it != (*trail_it).end(); ++it)
-    //   {
-    //     circle(out_img, *it, radius, Scalar(0, 255, 0), 1);
-    //   }
-    //   // draw lines between tracked points for visualization purposes
-    //   // for(trail_it = tracking_indices[i].begin(); trail_it != tracking_indices[i].end(); ++trail_it)
-    //   // {
-    //   //   line(out_img, prev_track_indices[i], curr_track_indices[i], Scalar(0, 255, 0), 2, 8, 0);
-    //   //
-    //   // }
-    //   // --radius;
-    //   ++radius;
-    // }
-
     // package and send output pose to EKF
     pose_out.x = 0;
     pose_out.y = 0;
-    pose_out.theta = accumulated.x;
+    pose_out.theta = accumulated_xy.x;
     pose_pub.publish(pose_out);
 
     // draw tracked points for visualization purposes
@@ -380,47 +255,36 @@ public:
     //   circle(out_img, curr_track_indices[i], 3, Scalar(0, 255, 0), -1); // -1 = filled
     // }
 
-
+    // draw epipolar lines for visualization purposes
     std::vector<cv::Vec<float, 3> > epilines1, epilines2;
     cv::computeCorrespondEpilines(prev_track_indices, 1, F, epilines1); //Index starts with 1
     cv::computeCorrespondEpilines(curr_track_indices, 2, F, epilines2);
-    //
+
     CV_Assert(prev_track_indices.size() == epilines1.size() && epilines1.size() == epilines2.size());
 
     cv::RNG rng(0);
     for(int i = 0; i < prev_track_indices.size(); i++)
     {
-
-      /*
-      * Epipolar lines of the 1st point set are drawn in the 2nd image and vice-versa
-      */
+      // Epipolar lines of the 1st point set are drawn in the 2nd image and vice-versa
       cv::Scalar color(rng(256),rng(256),rng(256));
 
       cv::line(out_img, cv::Point(0,-epilines1[i][2]/epilines1[i][1]), cv::Point(prev.cols,-(epilines1[i][2]+epilines1[i][0]*prev.cols)/epilines1[i][1]), color);
       cv::circle(out_img, curr_track_indices[i], 3, color, -1, CV_AA);
-
-      cv::line(out_img, cv::Point(0,-epilines2[i][2]/epilines2[i][1]), cv::Point(curr.cols,-(epilines2[i][2]+epilines2[i][0]*curr.cols)/epilines2[i][1]), color);
-      cv::circle(out_img, curr_track_indices[i], 3, color, -1, CV_AA);
     }
 
-
     imshow(ColorWinName, out_img);
-    // imshow(GrayWinName, prev);
-    cv::waitKey(30); // 30 Hz camera = 33.3 ms per callback loop
+    cv::waitKey(30); // 30 Hz camera = 33.3 ms per callback loop, hold for 30
 
-    // THIS ONLY DOES A SHALLOW COPY, WILL BE OVERWRITTEN NEXT TIME I UPDATE CURR
-    // prev = curr; // set for next iteration
     curr.copyTo(prev); // deep copy, none of that shared pointer stuff
 
     prev_track_indices = curr_track_indices; // deep copy, MAKE SURE TO COMMENT OUT IF I REVERT TO CALLING goodFeaturesToTrack EACH LOOP
+
     // this function emulates std::remove_if, which is technically only available
     // in c++ version 11 or greater, and also does not work with OpenCV types
     vector<Point2f>::iterator first = prev_track_indices.begin();
     vector<Point2f>::iterator new_start = first;
     vector<Point2f>::iterator last = prev_track_indices.end();
-    // for(vector<Point2f>::iterator it = prev_track_indices.begin(), it != prev_track_indices.end(), ++it)
     while(first!=last)
-    // cout << "made it here" << endl;
     {
       if ((*first).x < 0.0 || (*first).x > CAM_WIDTH || (*first).y < 0.0 || (*first).y > CAM_HEIGHT)
       {
@@ -439,7 +303,10 @@ public:
 
     prev_track_indices.begin() = new_start;
 
-  ++counter %= TRAIL_LENGTH;
+    // THIS IS SEGFAULTING RIGHT NOW, FIGURE IT OUT LATER
+    // RemoveOutOfBounds(prev_track_indices);
+
+    ++counter %= TRAIL_LENGTH;
 
 
 
@@ -681,6 +548,22 @@ public:
     return sum;
   } // END OF FUNCTION traceof() ###############################################
 
+  void RemoveOutOfBounds(vector<Point2f> &v)
+  {
+    // this function emulates std::remove_if, which is technically
+    // only available in c++ version 11 or greater, and also does
+    // not work with OpenCV types anyway
+    for(vector<Point2f>::iterator it = v.begin(); it != v.end(); ++it)
+    {
+      if((*it).x < 0.0 || (*it).x > CAM_WIDTH || (*it).y < 0.0 || (*it).y > CAM_HEIGHT)
+      {
+        prev_track_indices.erase(it);
+      }
+    }
+
+    return;
+  } // END OF FUNCTION RemoveOutOfBounds() ##########################################
+
 }; // END OF CLASS FlowCalculator ##############################################
 
 
@@ -693,3 +576,46 @@ int main(int argc, char** argv)
   ros::spin();
   return 0;
 }
+
+    // undistort image (before calculating Fundamental Matrix) - turns out to be too laggy
+    // try undistorting only tracked points instead (before calculating Fundamental Matrix)
+    // http://stackoverflow.com/questions/25251676/opencv-findfundamentalmat-very-unstable-and-sensitive
+    // undistortPoints(curr_track_indices, curr_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
+    // undistortPoints(prev_track_indices, prev_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
+    // DOES THIS WORK WITH INDICES OR ACTUAL POINT DATA???? SHOULD BE INDICES, BUT GETTING NANS
+    // The function can be used for both a stereo camera head or a monocular camera (when R is empty).
+    // ^ DOES THIS MEAN I SHOULDN'T BE USIN R OR P (rectification_matrix OR projection_matrix)?
+
+    // undistorting using built-in function isn't working, try homebrew solution instead:
+    // prev_track_undistorted = normalize(prev_track_indices);
+    // curr_track_undistorted = normalize(curr_track_indices);
+    // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
+    // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
+
+    // center data per Wu's lecture 12
+    // prev_track_centered = centerData(prev_track_indices);
+    // curr_track_centered = centerData(curr_track_indices);
+    // prev_track_centered = centerData(prev_track_undistorted);
+    // curr_track_centered = centerData(curr_track_undistorted);
+    // cout << "prev_track_centered:\n" << prev_track_centered << endl;
+    // cout << "curr_track_centered:\n" << curr_track_centered << endl;
+
+    // DOING THIS AFTER UNDISTORTING THROWS OFF RESULTS (SINCE POINTS ARE NOW IN CAM COORDS INSTEAD OF PIXELS)
+    // Point2f derp = uv_left_right(prev_track_undistorted, curr_track_undistorted);
+    // accumulated_xy += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
+    // // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
+    // cout << "accumulated u, v = " << setw(12) << accumulated_xy.x << ", " << setw(12) << accumulated_xy.y << endl;
+
+    // comparison of findFundamentalMat solver techniques:
+    // http://fhtagn.net/prog/2012/09/27/opencv-fundamentalmat.html
+    // per this, may be better to use LMedS instead of RANSAC...
+    // F = findFundamentalMat(prev_track_indices, curr_track_undistorted, FM_RANSAC, 1, 0.99, F_indices_mask);
+    // F = findFundamentalMat(prev_track_indices, curr_track_indices, FM_RANSAC, 1, 0.99, flow_status);
+    // ransac sucks, how about this?:
+    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_LMEDS, 1, 0.99, F_indices_mask);
+    // that sucked too, how about this?:
+    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_8POINT, 1, 0.99, F_indices_mask);
+    // welp, they all suck. back to the drawing board
+    // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 1, 0.99, F_indices_mask);
+    // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 0.01, 0.99, F_indices_mask); // 0.01 is guess
+    // cout << "F:\n" << F << endl;
