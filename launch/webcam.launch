@@ -11,7 +11,8 @@
     <!-- <param name="autofocus" value="true" /> -->
 
     <param name="camera_name" value="external_webcam" />
-    <param name="camera_info_url" value="file:///home/njk/Courses/EECS432/Project/ros_ws/src/eecs432_project/calibration/external_webcam.yml" />
+    <param name="camera_info_url" value="file:///home/adam/ros-workspaces/general_ws/src/advanced_cv/calibration/external_webcam.yml" />
+    <!-- <param name="camera_info_url" value="file:///home/njk/Courses/EECS432/Project/ros_ws/src/eecs432_project/calibration/external_webcam.yml" /> -->
     <!-- <param name="camera_info_url" textfile="file://$(find eecs432_project)/calibration/external_webcam.yml" /> -->
     <!-- THE $(find <package>) PATH ISN'T WORKING, WHY? -->
   </node>

@@ -19,11 +19,11 @@ def main():
         visual_odom.header.frame_id = 'front_camera_optical'
         visual_odom.header.stamp = current_time
         visual_odom.pose.covariance[0] = 0.5
-        visual_odom.pose.covariance[0] = 0.5
-        visual_odom.pose.covariance[0] = 0.00001
-        visual_odom.pose.covariance[0] = 0.0
-        visual_odom.pose.covariance[0] = 0.0
-        visual_odom.pose.covariance[0] = 0.5
+        visual_odom.pose.covariance[7] = 0.5
+        visual_odom.pose.covariance[14] = 0.00001
+        visual_odom.pose.covariance[21] = 0.0
+        visual_odom.pose.covariance[28] = 0.0
+        visual_odom.pose.covariance[35] = 0.5
         # visual_odom.pose.covariance = [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         optical_flow_pub.publish(visual_odom)
         rate.sleep()

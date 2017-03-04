@@ -1,5 +1,5 @@
 <launch>
-    <node pkg="advanced_cv" type="optical_flow_test_data.py" name="optical_flow_test_data" />
+    <node pkg="eecs432_project" type="optical_flow_test_data.py" name="optical_flow_test_data" />
 
     <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization_custom" clear_params="true"> <!-- renamed to ekf_localization_custom to prevent name conflicts -->
 
@@ -16,6 +16,7 @@
       <param name="world_frame" value="odom"/>
 
       <param name="odom0" value="/optical_flow"/>
+      <!-- <param name="imu0" value="/imu/test_data"/> -->
       <param name="imu0" value="/imu/data"/>
 
       <rosparam param="odom0_config">[true,  true,  true,
