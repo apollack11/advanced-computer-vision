@@ -2,6 +2,7 @@
 #include <ros/ros.h>
 #include <sensor_msgs/image_encodings.h>
 #include <geometry_msgs/Pose2D.h>
+#include <geometry_msgs/Twist.h>
 
 // for subscribing to compressed image topics:
 #include <image_transport/image_transport.h>
@@ -61,6 +62,7 @@ private:
   image_transport::ImageTransport it_;
   image_transport::Subscriber image_sub;
   ros::Publisher pose_pub;
+  ros::Publisher twist_pub;
 
   // image structures and indices:
   cv::Mat curr_color;
@@ -102,12 +104,17 @@ private:
   float accumulated_heading;
   float accumulated_travel;
   Point3f accumulated_motion;
+  Point3f derpz;
   geometry_msgs::Pose2D pose_out;
+  geometry_msgs::Twist twist_out;
 
   // testing out Farneback's instead of LK to solve OF:
   Mat curr_track_indices_mat;
   // cv::Mat H; // Perspective Transformation (Homography) Matrix
   cv::Matx33d H; // Perspective Transformation (Homography) Matrix
+
+  double t_curr;
+  double t_prev;
 
 
 public:
@@ -122,6 +129,7 @@ public:
 
     // publish output pose estimate to EKF
     pose_pub = nh_.advertise<geometry_msgs::Pose2D>("/optical_flow/pose", 1);
+    twist_pub = nh_.advertise<geometry_msgs::Twist>("/optical_flow/twist", 1);
 
     // create a single window instance, overwrite each loop
     ColorWinName = "Color Output Window";
@@ -166,6 +174,8 @@ public:
     // float trap_height = 0.135; // meters, h
 
     cout << "HOMOGRAPHY / PERSPECTIVE PROJECTION = \n" << cv::getPerspectiveTransform(dataz1, dataz2) << endl;
+
+    t_prev = ros::Time::now().toSec();
 
 
   } // END OF CONSTRUCTOR ######################################################
@@ -238,7 +248,8 @@ public:
     float derp2 = estimate_travel(prev_track_indices, curr_track_indices);
     accumulated_travel += derp2;
 
-    accumulated_motion += estimate_motion(prev_track_indices, curr_track_indices);
+    derpz = estimate_motion(prev_track_indices, curr_track_indices);
+    accumulated_motion += derpz;
     cout << "ACCUMULATED MOVEMENT = " << accumulated_motion << endl;
     // x movement multiplied by circumference (2 * PI * Radius) multiplied by 360 (to convert to degrees)
     // also multiplied by a constant of 1.57 based on test data
@@ -298,7 +309,14 @@ public:
     pose_out.x = accumulated_motion.y;
     pose_out.y = 0;
     pose_out.theta = accumulated_motion.x / (2 * PI * 0.4485) * 2 * PI * 1.57;
-    pose_pub.publish(pose_out);
+    // pose_pub.publish(pose_out);
+
+    // trying to do twist output instead:
+    t_curr = ros::Time::now().toSec();
+    twist_out.linear.x = derpz.y / (t_curr - t_prev);
+    twist_out.angular.z = derpz.x / (2 * PI * 0.4485) * 2 * PI * 1.57 / (t_curr - t_prev);
+    twist_pub.publish(twist_out);
+
 
     // draw tracked points for visualization purposes
     out_img = curr_color; // copy over so we can draw tracked points over top
@@ -360,6 +378,7 @@ public:
     // RemoveOutOfBounds(prev_track_indices);
 
     ++counter %= TRAIL_LENGTH;
+    t_prev = t_curr;
 
 
 

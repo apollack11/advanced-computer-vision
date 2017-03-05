@@ -41,8 +41,8 @@
                                     true, true, true,
                                     false, false, false]</rosparam>
 
-      <param name="odom0_differential" value="true"/>
-      <param name="imu0_differential" value="true"/>
+      <param name="odom0_differential" value="false"/>
+      <param name="imu0_differential" value="false"/>
 
       <!-- <param name="imu0_remove_gravitational_acceleration" value="true"/> --> <!-- I don't think we want this -->
 

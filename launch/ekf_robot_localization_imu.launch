@@ -22,7 +22,7 @@
                                      true, true, true,
                                      true, true, true]</rosparam>
 
-      <param name="imu0_differential" value="true"/>
+      <param name="imu0_differential" value="false"/>
 
       <!-- <param name="imu0_remove_gravitational_acceleration" value="true"/> --> <!-- I don't think we want this -->
 
