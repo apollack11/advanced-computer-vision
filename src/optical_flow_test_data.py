@@ -5,16 +5,21 @@ from geometry_msgs.msg import Pose
 
 def main():
     rospy.init_node('optical_flow_output', anonymous=True)
-    optical_flow_pub = rospy.Publisher('optical_flow', Odometry, queue_size=10) # what msg type??
+    optical_flow_pub = rospy.Publisher('optical_flow', Odometry, queue_size=10)
     rate = rospy.Rate(30) # 30Hz because 30fps
     visual_odom = Odometry()
 
     while not rospy.is_shutdown():
         current_time = rospy.get_rostime()
 
-        visual_odom.pose.pose.position.x = 0.0
+        visual_odom.pose.pose.position.x = -.3269
         visual_odom.pose.pose.position.y = 0.0
         visual_odom.pose.pose.position.z = 0.0
+        visual_odom.pose.pose.orientation.x = 0.0
+        visual_odom.pose.pose.orientation.y = 0.0
+        visual_odom.pose.pose.orientation.z = 0.40399490
+        visual_odom.pose.pose.orientation.w = 0.91476124
+
         # visual_odom.pose.pose.orientation = [quaternion info]
         visual_odom.header.frame_id = 'front_camera_optical'
         visual_odom.header.stamp = current_time

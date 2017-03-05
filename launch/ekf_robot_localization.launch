@@ -1,9 +1,9 @@
 <launch>
     <!-- USE THIS FOR ALL ZERO DATA -->
-    <!-- <node pkg="eecs432_project" type="optical_flow_test_data.py" name="optical_flow_test_data" /> -->
+    <node pkg="eecs432_project" type="optical_flow_test_data.py" name="optical_flow_test_data" />
 
     <!-- USE THIS FOR OUTPUT OF flow.cpp -->
-    <node pkg="eecs432_project" type="data_converter.py" name="data_converter" />
+    <!-- <node pkg="eecs432_project" type="data_converter.py" name="data_converter" /> -->
 
     <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization_custom" clear_params="true"> <!-- renamed to ekf_localization_custom to prevent name conflicts -->
 

@@ -10,16 +10,13 @@ class optical_flow_conversion:
         self.optical_flow_sub = rospy.Subscriber('optical_flow/pose', Pose2D, self.callback)
         self.rate = rospy.Rate(30) # 30Hz because 30fps
         self.visual_odom = Odometry()
-        self.yaw = 0.0
         self.quaternion = [0.0,0.0,0.0,0.0]
 
     def callback(self,data):
-        self.yaw = data.theta
-        self.quaternion = tf.transformations.quaternion_from_euler(0,0,self.yaw)
+        self.quaternion = tf.transformations.quaternion_from_euler(0,0,data.theta)
 
         self.current_time = rospy.get_rostime()
-
-        self.visual_odom.pose.pose.position.x = 0.0
+        self.visual_odom.pose.pose.position.x = data.x
         self.visual_odom.pose.pose.position.y = 0.0
         self.visual_odom.pose.pose.position.z = 0.0
         self.visual_odom.pose.pose.orientation.x = self.quaternion[0]

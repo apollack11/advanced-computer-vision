@@ -101,11 +101,13 @@ private:
   Point2f accumulated_xy;
   float accumulated_heading;
   float accumulated_travel;
+  Point3f accumulated_motion;
   geometry_msgs::Pose2D pose_out;
 
   // testing out Farneback's instead of LK to solve OF:
   Mat curr_track_indices_mat;
-  cv::Mat H; // Perspective Transformation (Homography) Matrix
+  // cv::Mat H; // Perspective Transformation (Homography) Matrix
+  cv::Matx33d H; // Perspective Transformation (Homography) Matrix
 
 
 public:
@@ -141,18 +143,22 @@ public:
     float projection_matrix_data[12] = {1160.519653, 0.0, 349.420934, 0.0, 0.0, 1164.307007, 275.445505, 0.0, 0.0, 0.0, 1.0, 0.0};
     projection_matrix = cv::Mat(3, 4, CV_32F, projection_matrix_data);
 
-    float H_data[9] = {0.0002347417933653588, -9.613823951336309e-20, -0.07500000298023225, -7.422126200315807e-19, -0.0002818370786240783, 0.5159999728202818, 1.683477982667922e-19, 5.30242624981192e-18, 1};
-    H = cv::Mat(3, 3, CV_32F, H_data);
+    double H_data[9] = {0.0002347417933653588, -9.613823951336309e-20, -0.07500000298023225, -7.422126200315807e-19, -0.0002818370786240783, 0.5159999728202818, 1.683477982667922e-19, 5.30242624981192e-18, 1};
+    // double H_data[9] = {7.663530590283282e-19, -0.0002818370786240823, 0.515999972820282, 0.000234741793365359, 5.35748339138345e-20, -0.07500000298023224, 2.155275334288567e-18, -2.683400376901623e-18, 1};
+
+    H = cv::Mat(3, 3, CV_64F, H_data);
 
     accumulated_xy = Point2f(0.0, 0.0);
     accumulated_heading = 0.0;
     accumulated_travel = 0.0;
+    accumulated_motion = Point3f(0.0, 0.0, 0.0);
 
     counter = 0.0;
 
     // THIS IS JUST FOR DEVELOPMENT PURPOSES:
     const Point2f dataz1[] = {Point2f(0.0, 0.0), Point2f(639.0, 0.0), Point2f(0.0, 479.0), Point2f(639.0, 479.0)};
     const Point2f dataz2[] = {Point2f(-0.075, 0.516), Point2f(0.075, 0.516), Point2f(-0.075, 0.381), Point2f(0.075, 0.381)};
+    // const Point2f dataz2[] = {Point2f(0.516, -0.075), Point2f(0.516, 0.075), Point2f(0.381, -0.075), Point2f(0.381, 0.075)};
 
     // float turn_rad = 0.381 // meters, from center of robot to base of visible trapezoid
     // float trap_base = 0.12; // meters, base of trapezoid visible to camera
@@ -232,12 +238,15 @@ public:
     float derp2 = estimate_travel(prev_track_indices, curr_track_indices);
     accumulated_travel += derp2;
 
-    estimate_everything(prev_track_indices, curr_track_indices);
-
+    accumulated_motion += estimate_motion(prev_track_indices, curr_track_indices);
+    cout << "ACCUMULATED MOVEMENT = " << accumulated_motion << endl;
+    // x movement multiplied by circumference (2 * PI * Radius) multiplied by 360 (to convert to degrees)
+    // also multiplied by a constant of 1.57 based on test data
+    cout << "ANGLE = " << accumulated_motion.x / (2 * PI * 0.4485) * 360 * 1.57 << endl;
 
     // if(derpdyderp > 0.001 || derp2 > 0.1)
     // {
-      cout << "(#=" << prev_track_indices.size() << ")\tyaw, forward motion = " << setw(10) << accumulated_heading << ", " << setw(10) << accumulated_travel << endl;
+      // cout << "(#=" << prev_track_indices.size() << ")\tyaw, forward motion = " << setw(10) << accumulated_heading << ", " << setw(10) << accumulated_travel << endl;
     // }
 
     // comparison of findFundamentalMat solver techniques:
@@ -286,9 +295,9 @@ public:
     // }
 
     // package and send output pose to EKF
-    pose_out.x = 0;
+    pose_out.x = accumulated_motion.y;
     pose_out.y = 0;
-    pose_out.theta = accumulated_xy.x;
+    pose_out.theta = accumulated_motion.x / (2 * PI * 0.4485) * 2 * PI * 1.57;
     pose_pub.publish(pose_out);
 
     // draw tracked points for visualization purposes
@@ -483,41 +492,39 @@ public:
   } // END OF FUNCTION uv_left_right() #########################################
 
 
-  float estimate_everything(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
+  Point3f estimate_motion(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
   { // function to calculate the rotational & translational motion from frame-to-frame
-    // float turn_rad = 0.381; // meters, from center of robot to base of visible trapezoid
-    // float trap_base = 0.12; // meters, base of trapezoid visible to camera
-    // float trap_top = 0.15; // meters, top of trapezoid visible to camera
-    // float trap_height = 0.135; // meters, height of trapezoid visible to camera
 
     int N = prev_coords.size();
-    // float tang_dist = 0.0;
-    vector<Point3f> world_motion;
     vector<Point3f> curr_homog;
     vector<Point3f> prev_homog;
     convertPointsToHomogeneous(curr_coords, curr_homog);
     convertPointsToHomogeneous(prev_coords, prev_homog);
 
+    Point3f motion_avg = Point3f(0.0, 0.0, 0.0);
 
     // calc total left/right tracked point movement
     vector<Point3f>::iterator it1 = prev_homog.begin(); // sizes should already
     vector<Point3f>::iterator it2 = curr_homog.begin(); // be verified equal
     for( ; it2 != curr_homog.end(); ++it1, ++it2)
-    {
-      // calculates robot coordinates from camera coordinates
-      world_motion.push_back(*it2 - *it1);
-      cout << *it2 - *it1 << endl;
+    { // calculates robot coordinates from camera coordinates
+      motion_avg += Point3f((H * Mat(*it2) - H * Mat(*it1)) / N); // you can tell it's the average by the way that it is!
     }
 
-    // now calculate average and apply deadband of 0.001 m
-    // (so we don't accrue unnecessary noise errors)
-    // float uavg = (fabs(tang_dist/N) > 0.001 ? tang_dist/N : 0);
-    // float uavg = tang_dist/N;
+    // correct y-axis (fore-aft) sign (so forward motion = positive value)
+    // factor for speed of 0.1 (from spreadsheet)
+    motion_avg.y *= -1.57;
 
-    // return movement IN RADIANS
-    // return uavg / CAM_PIX_U * CAM_M_U / CAM_RADIAL; // again, this is in RADIANS
-    return 0.0;
-  } // END OF FUNCTION estimate_heading() ######################################
+    // now apply deadband of 0.5 mm or so (so we don't accrue unnecessary noise errors)
+    if(fabs(motion_avg.x) > 0.0005 || fabs(motion_avg.y) > 0.0005)
+    {
+      return motion_avg;
+    }
+    else
+    {
+      return Point3f(0.0, 0.0, 0.0);
+    }
+  } // END OF FUNCTION estimate_motion() ###################################
 
 
   float estimate_heading(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
