@@ -4,7 +4,7 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose
 
 def main():
-    rospy.init_node('optical_flow_output', anonymous=True)
+    rospy.init_node('optical_flow_test_data', anonymous=True)
     optical_flow_pub = rospy.Publisher('optical_flow', Odometry, queue_size=10) # what msg type??
     rate = rospy.Rate(30) # 30Hz because 30fps
     visual_odom = Odometry()

@@ -1,11 +1,5 @@
 <launch>
-    <!-- USE THIS FOR ALL ZERO DATA -->
-    <!-- <node pkg="eecs432_project" type="optical_flow_test_data.py" name="optical_flow_test_data" /> -->
-
-    <!-- USE THIS FOR OUTPUT OF flow.cpp -->
-    <node pkg="eecs432_project" type="data_converter.py" name="data_converter" />
-
-    <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization_custom" clear_params="true"> <!-- renamed to ekf_localization_custom to prevent name conflicts -->
+    <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization_imu" clear_params="true"> <!-- renamed to ekf_localization_custom to prevent name conflicts -->
 
       <param name="frequency" value="30"/> <!-- this value should be fine -->
 
@@ -19,15 +13,8 @@
       <param name="base_link_frame" value="base_link"/>
       <param name="world_frame" value="odom"/>
 
-      <param name="odom0" value="/optical_flow"/>
       <!-- <param name="imu0" value="/imu/test_data"/> -->
       <param name="imu0" value="/imu/data"/>
-
-      <rosparam param="odom0_config">[true,  true,  true,
-                                      false, false, true,
-                                      false, false, false,
-                                      false, false, false,
-                                      false, false, false]</rosparam>
 
       <rosparam param="imu0_config">[false, false, false,
                                      true,  true,  true,
@@ -35,7 +22,6 @@
                                      true, true, true,
                                      true, true, true]</rosparam>
 
-      <param name="odom0_differential" value="true"/>
       <param name="imu0_differential" value="true"/>
 
       <!-- <param name="imu0_remove_gravitational_acceleration" value="true"/> --> <!-- I don't think we want this -->
@@ -59,7 +45,7 @@
                                                   0.0, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0,
                                                   0.0, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.015]</rosparam>
 
-      <remap from="/odometry/filtered" to="/filter_test" />
+      <remap from="/odometry/filtered" to="/imu/odometry" />
     </node>
 
 </launch>
