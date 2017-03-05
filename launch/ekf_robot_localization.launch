@@ -1,9 +1,9 @@
 <launch>
     <!-- USE THIS FOR ALL ZERO DATA -->
-    <node pkg="eecs432_project" type="optical_flow_test_data.py" name="optical_flow_test_data" />
+    <!-- <node pkg="eecs432_project" type="optical_flow_test_data.py" name="optical_flow_test_data" /> -->
 
     <!-- USE THIS FOR OUTPUT OF flow.cpp -->
-    <!-- <node pkg="eecs432_project" type="data_converter.py" name="data_converter" /> -->
+    <node pkg="eecs432_project" type="data_converter.py" name="data_converter" />
 
     <node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization_custom" clear_params="true"> <!-- renamed to ekf_localization_custom to prevent name conflicts -->
 
@@ -29,11 +29,17 @@
                                       false, false, false,
                                       false, false, false]</rosparam>
 
-      <rosparam param="imu0_config">[false, false, false,
+      <!-- <rosparam param="imu0_config">[false, false, false,
                                      true,  true,  true,
                                      false, false, false,
                                      true, true, true,
-                                     true, true, true]</rosparam>
+                                     true, true, true]</rosparam> -->
+
+     <rosparam param="imu0_config">[false, false, false,
+                                    true,  true,  true,
+                                    false, false, false,
+                                    true, true, true,
+                                    false, false, false]</rosparam>
 
       <param name="odom0_differential" value="true"/>
       <param name="imu0_differential" value="true"/>

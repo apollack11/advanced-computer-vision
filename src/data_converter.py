@@ -10,7 +10,7 @@ class optical_flow_conversion:
         self.optical_flow_sub = rospy.Subscriber('optical_flow/pose', Pose2D, self.callback)
         self.rate = rospy.Rate(30) # 30Hz because 30fps
         self.visual_odom = Odometry()
-        self.quaternion = [0.0,0.0,0.0,0.0]
+        #self.quaternion = [0.0,0.0,0.0,0.0]
 
     def callback(self,data):
         self.quaternion = tf.transformations.quaternion_from_euler(0,0,data.theta)
@@ -25,12 +25,12 @@ class optical_flow_conversion:
         self.visual_odom.pose.pose.orientation.w = self.quaternion[3]
         self.visual_odom.header.frame_id = 'front_camera_optical'
         self.visual_odom.header.stamp = self.current_time
-        self.visual_odom.pose.covariance[0] = 0.5
-        self.visual_odom.pose.covariance[7] = 0.5
-        self.visual_odom.pose.covariance[14] = 0.00000001
-        self.visual_odom.pose.covariance[21] = 0.0
-        self.visual_odom.pose.covariance[28] = 0.0
-        self.visual_odom.pose.covariance[35] = 0.5
+        self.visual_odom.pose.covariance[0] = 0.001
+        self.visual_odom.pose.covariance[7] = 0.001
+        self.visual_odom.pose.covariance[14] = 1000000.0
+        self.visual_odom.pose.covariance[21] = 1000000.0
+        self.visual_odom.pose.covariance[28] = 1000000.0
+        self.visual_odom.pose.covariance[35] = 0.03
         self.optical_flow_pub.publish(self.visual_odom)
         self.rate.sleep()
 
