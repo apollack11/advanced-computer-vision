@@ -58,7 +58,7 @@ private:
   vector<Point2f> curr_track_undistorted;
   vector<Point2f> prev_track_undistorted;
 
-  // optial flow, Fundamental & Essential matrices:
+  // optical flow, Fundamental & Essential matrices:
   vector<float> flow_errs;
   vector<unsigned char> flow_status;
   vector<unsigned char> F_indices_mask; // outliers from RANSAC or LMedS when finding F
@@ -76,7 +76,9 @@ private:
   cv::Mat distortion_coefficients; // distortion coefficients (from calibration file)
   cv::Mat rectification_matrix; // rectification matrix (from calibration file)
   cv::Mat projection_matrix; // projection matrix (from calibration file)
-  Mat W; // multiview geometry eqn 9.13, H&Z
+  // W MUST BE A Matx33d OR THE ROTATION MATRIX WILL COME OUT WRONG (e-280 ISSUE)
+  // INVESTIGATE LATER, NO TIME TO DIVE INTO THIS NOW
+  Matx33d W; // multiview geometry eqn 9.13, H&Z
   Mat R; // rotation matrix
   Mat t; // translation vector
 
@@ -107,25 +109,25 @@ public:
     cv::namedWindow(ColorWinName, WINDOW_AUTOSIZE);
 
     // hack these for now since can't initialize the way I want to (stupid pre-c++11!)
-    float camera_matrix_data[9] = {1149.322298, 0.0, 351.778662, 0.0, 1151.593614, 276.459807, 0.0, 0.0, 1.0};
+    double camera_matrix_data[9] = {1149.322298, 0.0, 351.778662, 0.0, 1151.593614, 276.459807, 0.0, 0.0, 1.0};
     camera_matrix = cv::Mat(3, 3, CV_64F, camera_matrix_data);
 
     float distortion_coefficients_data[5] = {-0.073669, 1.170392, 0.000976, -0.00244, 0.0};
     distortion_coefficients = cv::Mat(1, 5, CV_32F, distortion_coefficients_data);
 
-    float Wtmp_data[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    double Wtmp_data[9] = {0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0};
     W = cv::Mat(3, 3, CV_64F, Wtmp_data);
 
-    float rectification_matrix_data[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    float rectification_matrix_data[9] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     rectification_matrix = cv::Mat(3, 3, CV_32F, rectification_matrix_data);
 
-    float projection_matrix_data[12] = {1160.519653, 0, 349.420934, 0, 0, 1164.307007, 275.445505, 0, 0, 0, 1, 0};
+    float projection_matrix_data[12] = {1160.519653, 0.0, 349.420934, 0.0, 0.0, 1164.307007, 275.445505, 0.0, 0.0, 0.0, 1.0, 0.0};
     projection_matrix = cv::Mat(3, 4, CV_32F, projection_matrix_data);
 
     accumulated_xy = Point2f(0.0, 0.0);
-    accumulated_z = 0;
+    accumulated_z = 0.0;
 
-    counter = 0;
+    counter = 0.0;
 
   } // END OF CONSTRUCTOR ######################################################
 
@@ -218,29 +220,30 @@ public:
     double pitch = asin(R.at<float>(2, 0));
     double yaw = -atan2(R.at<float>(1, 0), R.at<float>(0, 0));
 
-    cout << "Trace(R) = " << traceof(R) << endl;
-    if(traceof(R) > 0)
-    {
-      // cout << "RPY: " << setw(15) << roll << setw(15) << pitch << setw(15) << yaw << endl;// '\t' << R.type() << endl;
-      cout << "R:\n" << R << '\n' << endl;
-    }
-
-    // if(!(counter%15)) // every 1/2 second, print:
+    // cout << "Trace(R) = " << traceof(R) << endl;
+    // if(traceof(R) > 0)
     // {
-    //   // cout << "curr_track_indices:\n" << curr_track_indices << endl;
-    //   // cout << "prev_track_indices:\n" << prev_track_indices << endl;
-    //   // cout << "sizes of each:\t" << curr_track_indices.size() << '\t' << prev_track_indices.size() << endl;
-    //   // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
-    //   // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
-    //   // cout << "curr_track_centered:\n" << curr_track_centered << endl;
-    //   // cout << "prev_track_centered:\n" << prev_track_centered << endl;
-    //   // cout << "curr pixel val:\n" << curr.at<cv::Vec3b>(30,30) << endl;
-    //   // cout << "prev pixel val:\n" << prev.at<cv::Vec3b>(30,30) << endl;
-    //   cout << "F:\n" << F << endl;
-    //   cout << "E:\n" << E << endl;
-    //   cout << "R:\n" << R << endl;
-    //   cout << "t:\n" << t << endl;
+    //   // cout << "RPY: " << setw(15) << roll << setw(15) << pitch << setw(15) << yaw << endl;// '\t' << R.type() << endl;
+    //   cout << "R:\n" << R << '\n' << endl;
     // }
+
+    if(!(counter%15)) // every 1/2 second, print:
+    {
+      // cout << "curr_track_indices:\n" << curr_track_indices << endl;
+      // cout << "prev_track_indices:\n" << prev_track_indices << endl;
+      // cout << "sizes of each:\t" << curr_track_indices.size() << '\t' << prev_track_indices.size() << endl;
+      // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
+      // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
+      // cout << "curr_track_centered:\n" << curr_track_centered << endl;
+      // cout << "prev_track_centered:\n" << prev_track_centered << endl;
+      // cout << "curr pixel val:\n" << curr.at<cv::Vec3b>(30,30) << endl;
+      // cout << "prev pixel val:\n" << prev.at<cv::Vec3b>(30,30) << endl;
+      cout << "F:\n" << F << endl;
+      cout << "E:\n" << E << endl;
+      cout << "R:\n" << R << endl;
+      cout << "Trace(R) = " << traceof(R) << endl;
+      cout << "t:\n" << t << endl;
+    }
 
     // package and send output pose to EKF
     pose_out.x = 0;
@@ -570,7 +573,7 @@ public:
 
 int main(int argc, char** argv)
 {
-  ros::init(argc, argv, "dontknowwhattocallthisnode");
+  ros::init(argc, argv, "reallydontknowwhattocallthisnode");
   // ros::param::set("_image_transport", "compressed");
   FlowCalculator fc;
   ros::spin();
