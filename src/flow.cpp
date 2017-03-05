@@ -24,13 +24,28 @@
 #include <algorithm>
 
 
-#define MAX_INDICES 300 // # of points to track w/ optical flow
+#define PI 3.1416 // mmm, delicious pi
+#define MAX_POINTS 300 // max # of points to track w/ optical flow
 #define TRAIL_LENGTH 30 // not currently being used for any real purposes
-#define CAM_WIDTH 640 // pixels
-#define CAM_HEIGHT 480 // pixels
-// #define CAM_ANGLE_U 31.67 // degrees subtended by camera in u direction (wider of the two)
-// #define CAM_ANGLE_U 0.5527 // radians subtended by camera in u direction (wider of the two)
-#define PIX_ANGLE_U 0.0008637 // radians subtended by each pixel in u direction
+#define CAM_PIX_U 640 // pixels
+#define CAM_PIX_V 480 // pixels
+#define CAM_HEIGHT 0.238 // meters from lens center to ground
+#define CAM_RADIAL 0.2413 // meters radial distance from center of robot
+#define CAM_DEG 45 // degrees from horizontal
+#define CAM_RAD 0.7854 // radians from horizontal
+#define CAM_M_U 0.1334 // meters subtended by camera in u direction (wider of the two)
+#define CAM_M_V 0.1334 // meters subtended by camera in v direction (narrower of the two) - THIS IS MAGICALLY THE SAME
+#define CAM_DEG_U 23.86 // degrees subtended by camera in u direction (wider of the two)
+#define CAM_DEG_V 18.15 // degrees subtended by camera in v direction (narrower of the two)
+#define CAM_RAD_U 0.416 // radians subtended by camera in u direction (wider of the two)
+#define CAM_RAD_V 0.317 // radians subtended by camera in v direction (narrower of the two)
+#define PIX_DEG_U 0.03728 // degrees subtended by each pixel in u direction
+#define PIX_DEG_V 0.03781 // degrees subtended by each pixel in v direction
+#define PIX_RAD_U 0.00065 // radians subtended by each pixel in u direction
+#define PIX_RAD_V 0.00066 // radians subtended by each pixel in v direction
+
+// WE SHOULD CALCULATE DELTA TIME EACH FUNCTION CALL IF WE'RE GOING TO USE IT
+// SINCE ROS IS ASYNC AND COULD RUN INTO TROUBLE ASSUMING CONSTANT FREQ
 #define dt 0.033 // seconds expected between callbacks
 
 
@@ -84,11 +99,13 @@ private:
 
   // containers for output and motion estimate values:
   Point2f accumulated_xy;
-  float accumulated_z;
+  float accumulated_heading;
+  float accumulated_travel;
   geometry_msgs::Pose2D pose_out;
 
   // testing out Farneback's instead of LK to solve OF:
   Mat curr_track_indices_mat;
+  cv::Mat H; // Perspective Transformation (Homography) Matrix
 
 
 public:
@@ -124,10 +141,26 @@ public:
     float projection_matrix_data[12] = {1160.519653, 0.0, 349.420934, 0.0, 0.0, 1164.307007, 275.445505, 0.0, 0.0, 0.0, 1.0, 0.0};
     projection_matrix = cv::Mat(3, 4, CV_32F, projection_matrix_data);
 
+    float H_data[9] = {0.0002347417933653588, -9.613823951336309e-20, -0.07500000298023225, -7.422126200315807e-19, -0.0002818370786240783, 0.5159999728202818, 1.683477982667922e-19, 5.30242624981192e-18, 1};
+    H = cv::Mat(3, 3, CV_32F, H_data);
+
     accumulated_xy = Point2f(0.0, 0.0);
-    accumulated_z = 0.0;
+    accumulated_heading = 0.0;
+    accumulated_travel = 0.0;
 
     counter = 0.0;
+
+    // THIS IS JUST FOR DEVELOPMENT PURPOSES:
+    const Point2f dataz1[] = {Point2f(0.0, 0.0), Point2f(639.0, 0.0), Point2f(0.0, 479.0), Point2f(639.0, 479.0)};
+    const Point2f dataz2[] = {Point2f(-0.075, 0.516), Point2f(0.075, 0.516), Point2f(-0.075, 0.381), Point2f(0.075, 0.381)};
+
+    // float turn_rad = 0.381 // meters, from center of robot to base of visible trapezoid
+    // float trap_base = 0.12; // meters, base of trapezoid visible to camera
+    // float trap_top = 0.15; // meters, top of trapezoid visible to camera
+    // float trap_height = 0.135; // meters, h
+
+    cout << "HOMOGRAPHY / PERSPECTIVE PROJECTION = \n" << cv::getPerspectiveTransform(dataz1, dataz2) << endl;
+
 
   } // END OF CONSTRUCTOR ######################################################
 
@@ -165,10 +198,10 @@ public:
 // BEGIN LK METHOD >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 // $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
 
-    if(prev_track_indices.size() < 0.75*MAX_INDICES) // if enough tracking indices are dropped, calculate a new set
+    if(prev_track_indices.size() < 0.75*MAX_POINTS) // if enough tracking indices are dropped, calculate a new set
     {
       // create vector of good points to track from previous image
-      goodFeaturesToTrack(prev, prev_track_indices, MAX_INDICES, 0.05, 5.0);
+      goodFeaturesToTrack(prev, prev_track_indices, MAX_POINTS, 0.1, 5.0);
     }
     // cout << "prev_track_indices.size(): " << prev_track_indices.size() << endl;
 
@@ -189,15 +222,22 @@ public:
     if(curr_track_indices.size() != prev_track_indices.size())
     { ROS_ERROR("tracking index data size different between previous and current images"); }
 
-    Point2f derp = uv_left_right(prev_track_indices, curr_track_indices);
-    accumulated_xy += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
+    // Point2f derp = uv_left_right(prev_track_indices, curr_track_indices);
+    float derpdyderp = estimate_heading(prev_track_indices, curr_track_indices);
+    // THIS PART CURRENTLY ONLY WORKS WELL WHEN THERE ARE > 50 TRACKING POINTS
+    // AND ALSO AT ~0.5 TURNING SPEED. AT 0.1 IT OVERESTIMATED (90deg WAS MEASURED AS 120deg)
+    accumulated_heading += derpdyderp * 57.29; // converted to degrees just for visualization for now
 
-    float derp2 = uv_fore_aft(prev_track_indices, curr_track_indices);
-    accumulated_z += derp2;
+    // float derp2 = uv_fore_aft(prev_track_indices, curr_track_indices);
+    float derp2 = estimate_travel(prev_track_indices, curr_track_indices);
+    accumulated_travel += derp2;
 
-    // if(derp.x != 0 || derp.y != 0 || derp2 > 0.1)
+    estimate_everything(prev_track_indices, curr_track_indices);
+
+
+    // if(derpdyderp > 0.001 || derp2 > 0.1)
     // {
-    //   cout << "(#=" << prev_track_indices.size() << ")\tyaw, pitch, z_trans = " << setw(12) << accumulated_xy.x << ", " << setw(12) << accumulated_xy.y << ", " << setw(12) << accumulated_z << endl;
+      cout << "(#=" << prev_track_indices.size() << ")\tyaw, forward motion = " << setw(10) << accumulated_heading << ", " << setw(10) << accumulated_travel << endl;
     // }
 
     // comparison of findFundamentalMat solver techniques:
@@ -227,23 +267,23 @@ public:
     //   cout << "R:\n" << R << '\n' << endl;
     // }
 
-    if(!(counter%15)) // every 1/2 second, print:
-    {
-      // cout << "curr_track_indices:\n" << curr_track_indices << endl;
-      // cout << "prev_track_indices:\n" << prev_track_indices << endl;
-      // cout << "sizes of each:\t" << curr_track_indices.size() << '\t' << prev_track_indices.size() << endl;
-      // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
-      // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
-      // cout << "curr_track_centered:\n" << curr_track_centered << endl;
-      // cout << "prev_track_centered:\n" << prev_track_centered << endl;
-      // cout << "curr pixel val:\n" << curr.at<cv::Vec3b>(30,30) << endl;
-      // cout << "prev pixel val:\n" << prev.at<cv::Vec3b>(30,30) << endl;
-      cout << "F:\n" << F << endl;
-      cout << "E:\n" << E << endl;
-      cout << "R:\n" << R << endl;
-      cout << "Trace(R) = " << traceof(R) << endl;
-      cout << "t:\n" << t << endl;
-    }
+    // if(!(counter%15)) // every 1/2 second, print:
+    // {
+    //   // cout << "curr_track_indices:\n" << curr_track_indices << endl;
+    //   // cout << "prev_track_indices:\n" << prev_track_indices << endl;
+    //   // cout << "sizes of each:\t" << curr_track_indices.size() << '\t' << prev_track_indices.size() << endl;
+    //   // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
+    //   // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
+    //   // cout << "curr_track_centered:\n" << curr_track_centered << endl;
+    //   // cout << "prev_track_centered:\n" << prev_track_centered << endl;
+    //   // cout << "curr pixel val:\n" << curr.at<cv::Vec3b>(30,30) << endl;
+    //   // cout << "prev pixel val:\n" << prev.at<cv::Vec3b>(30,30) << endl;
+    //   cout << "F:\n" << F << endl;
+    //   cout << "E:\n" << E << endl;
+    //   cout << "R:\n" << R << endl;
+    //   cout << "Trace(R) = " << traceof(R) << endl;
+    //   cout << "t:\n" << t << endl;
+    // }
 
     // package and send output pose to EKF
     pose_out.x = 0;
@@ -271,8 +311,9 @@ public:
       // Epipolar lines of the 1st point set are drawn in the 2nd image and vice-versa
       cv::Scalar color(rng(256),rng(256),rng(256));
 
-      cv::line(out_img, cv::Point(0,-epilines1[i][2]/epilines1[i][1]), cv::Point(prev.cols,-(epilines1[i][2]+epilines1[i][0]*prev.cols)/epilines1[i][1]), color);
-      cv::circle(out_img, curr_track_indices[i], 3, color, -1, CV_AA);
+      // cv::line(out_img, cv::Point(0,-epilines1[i][2]/epilines1[i][1]), cv::Point(prev.cols,-(epilines1[i][2]+epilines1[i][0]*prev.cols)/epilines1[i][1]), color);
+      // cv::circle(out_img, curr_track_indices[i], 3, color, -1, CV_AA);
+      cv::circle(out_img, curr_track_indices[i], 3, Scalar(0, 255, 0), -1, CV_AA);
     }
 
     imshow(ColorWinName, out_img);
@@ -289,7 +330,7 @@ public:
     vector<Point2f>::iterator last = prev_track_indices.end();
     while(first!=last)
     {
-      if ((*first).x < 0.0 || (*first).x > CAM_WIDTH || (*first).y < 0.0 || (*first).y > CAM_HEIGHT)
+      if ((*first).x < 0.0 || (*first).x > CAM_PIX_U || (*first).y < 0.0 || (*first).y > CAM_PIX_V)
       {
         // cout << "made it into the mystical for loop!" << endl;
         // cout << "swapping this:" << *new_start;
@@ -435,19 +476,108 @@ public:
 
     // calc average left/right tracked point movement
     // also apply deadband of 1 pixel, so we don't accrue unnecessary error
-    float xavg = (abs(xsum/L) > 1 ? xsum/L : 0);
-    float yavg = (abs(ysum/L) > 1 ? ysum/L : 0);
+    float xavg = (fabs(xsum/L) > 1 ? xsum/L : 0);
+    float yavg = (fabs(ysum/L) > 1 ? ysum/L : 0);
 
     return Point2f(xavg, yavg);
   } // END OF FUNCTION uv_left_right() #########################################
+
+
+  float estimate_everything(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
+  { // function to calculate the rotational & translational motion from frame-to-frame
+    // float turn_rad = 0.381; // meters, from center of robot to base of visible trapezoid
+    // float trap_base = 0.12; // meters, base of trapezoid visible to camera
+    // float trap_top = 0.15; // meters, top of trapezoid visible to camera
+    // float trap_height = 0.135; // meters, height of trapezoid visible to camera
+
+    int N = prev_coords.size();
+    // float tang_dist = 0.0;
+    vector<Point3f> world_motion;
+    vector<Point3f> curr_homog;
+    vector<Point3f> prev_homog;
+    convertPointsToHomogeneous(curr_coords, curr_homog);
+    convertPointsToHomogeneous(prev_coords, prev_homog);
+
+
+    // calc total left/right tracked point movement
+    vector<Point3f>::iterator it1 = prev_homog.begin(); // sizes should already
+    vector<Point3f>::iterator it2 = curr_homog.begin(); // be verified equal
+    for( ; it2 != curr_homog.end(); ++it1, ++it2)
+    {
+      // calculates robot coordinates from camera coordinates
+      world_motion.push_back(*it2 - *it1);
+      cout << *it2 - *it1 << endl;
+    }
+
+    // now calculate average and apply deadband of 0.001 m
+    // (so we don't accrue unnecessary noise errors)
+    // float uavg = (fabs(tang_dist/N) > 0.001 ? tang_dist/N : 0);
+    // float uavg = tang_dist/N;
+
+    // return movement IN RADIANS
+    // return uavg / CAM_PIX_U * CAM_M_U / CAM_RADIAL; // again, this is in RADIANS
+    return 0.0;
+  } // END OF FUNCTION estimate_heading() ######################################
+
+
+  float estimate_heading(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
+  { // function to calculate the rotational motion from frame-to-frame
+    float turn_rad = 0.381; // meters, from center of robot to base of visible trapezoid
+    float trap_base = 0.12; // meters, base of trapezoid visible to camera
+    float trap_top = 0.15; // meters, top of trapezoid visible to camera
+    float trap_height = 0.135; // meters, height of trapezoid visible to camera
+
+    int N = prev_coords.size();
+    float tang_dist = 0.0;
+
+    // calc total left/right tracked point movement
+    vector<Point2f>::iterator it1 = prev_coords.begin(); // sizes should already
+    vector<Point2f>::iterator it2 = curr_coords.begin(); // be verified equal
+    for( ; it2 != curr_coords.end(); ++it1, ++it2)
+    {
+      // this calculates total tangential distance traveled in meters
+      tang_dist += ((*it2).x - (*it1).x) / CAM_PIX_U * trap_top - (trap_top - trap_base) * ((*it2).y + (*it1).y) / 2 / CAM_PIX_V;
+    }
+
+    // now calculate average and apply deadband of 0.001 m
+    // (so we don't accrue unnecessary noise errors)
+    // float uavg = (fabs(tang_dist/N) > 0.001 ? tang_dist/N : 0);
+    float uavg = tang_dist/N;
+
+    // return movement IN RADIANS
+    return uavg / CAM_PIX_U * CAM_M_U / CAM_RADIAL; // again, this is in RADIANS
+  } // END OF FUNCTION estimate_heading() ######################################
+
+
+  float estimate_travel(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
+  { // function to calculate the fore/aft distance driven from frame-to-frame
+    int N = prev_coords.size();
+    float vsum = 0.0;
+
+    // calc total left/right tracked point movement IN PIXELS
+    vector<Point2f>::iterator it1 = prev_coords.begin(); // sizes should already
+    vector<Point2f>::iterator it2 = curr_coords.begin(); // be verified equal
+    for( ; it2 != curr_coords.end(); ++it1, ++it2)
+    {
+      vsum += (*it2).y - (*it1).y;
+    }
+
+    // now calculate average and apply deadband of 1 pixel
+    // (so we don't accrue unnecessary noise errors)
+    float vavg = (fabs(vsum/N) > 1 ? vsum/N : 0);
+
+    // return fore/aft movement IN METERS
+    return vavg / CAM_PIX_V * CAM_M_U;
+
+  } // END OF FUNCTION estimate_travel() #######################################
 
 
   float uv_fore_aft(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
   {
     // function to calculate the z coordinate change from frame-to-frame
     // used to estimate camera motion relative to world
-    // int top = CAM_HEIGHT * 2/3;
-    // int bot = CAM_HEIGHT * 1/3; // ignoring middle 1/3 of image
+    // int top = CAM_PIX_V * 2/3;
+    // int bot = CAM_PIX_V * 1/3; // ignoring middle 1/3 of image
     // int top_count = 0;
     // int bot_count = 0;
     //
@@ -517,10 +647,10 @@ public:
       y_curr = (*it2).y;
       x_mid = (x_curr - x_prev)/2;
       y_mid = (y_curr - y_prev)/2;
-      v_len = sqrt(pow(x_mid - CAM_WIDTH/2, 2) + pow(y_mid - CAM_HEIGHT/2, 2));
+      v_len = sqrt(pow(x_mid - CAM_PIX_U/2, 2) + pow(y_mid - CAM_PIX_V/2, 2));
 
-      x_radial = (2 * x_mid) * (x_mid - CAM_WIDTH/2)/v_len;
-      y_radial = (2 * y_mid) * (y_mid - CAM_HEIGHT/2)/v_len;
+      x_radial = (2 * x_mid) * (x_mid - CAM_PIX_U/2)/v_len;
+      y_radial = (2 * y_mid) * (y_mid - CAM_PIX_V/2)/v_len;
       radial = x_radial + y_radial;
       radial_tot += radial;
     }
@@ -529,6 +659,7 @@ public:
     // return sqrt(pow(x_rad_tot, 2) + pow(y_rad_tot, 2)); // THIS WAS DEFINITELY WRONG, WHOOPS
 
   } // END OF FUNCTION uv_fore_aft() ###########################################
+
 
   double traceof(cv::Mat &input)
   {
@@ -558,7 +689,7 @@ public:
     // not work with OpenCV types anyway
     for(vector<Point2f>::iterator it = v.begin(); it != v.end(); ++it)
     {
-      if((*it).x < 0.0 || (*it).x > CAM_WIDTH || (*it).y < 0.0 || (*it).y > CAM_HEIGHT)
+      if((*it).x < 0.0 || (*it).x > CAM_PIX_U || (*it).y < 0.0 || (*it).y > CAM_PIX_V)
       {
         prev_track_indices.erase(it);
       }
@@ -605,7 +736,7 @@ int main(int argc, char** argv)
 
     // DOING THIS AFTER UNDISTORTING THROWS OFF RESULTS (SINCE POINTS ARE NOW IN CAM COORDS INSTEAD OF PIXELS)
     // Point2f derp = uv_left_right(prev_track_undistorted, curr_track_undistorted);
-    // accumulated_xy += derp * PIX_ANGLE_U * 57.29; // converted to degrees just for visualization for now
+    // accumulated_xy += derp * PIX_RAD_U * 57.29; // converted to degrees just for visualization for now
     // // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
     // cout << "accumulated u, v = " << setw(12) << accumulated_xy.x << ", " << setw(12) << accumulated_xy.y << endl;
 
