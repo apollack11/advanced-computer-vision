@@ -309,7 +309,7 @@ public:
     pose_out.x = accumulated_motion.y;
     pose_out.y = 0;
     pose_out.theta = accumulated_motion.x / (2 * PI * 0.4485) * 2 * PI * 1.57;
-    // pose_pub.publish(pose_out);
+    pose_pub.publish(pose_out);
 
     // trying to do twist output instead:
     t_curr = ros::Time::now().toSec();
@@ -532,7 +532,7 @@ public:
 
     // correct y-axis (fore-aft) sign (so forward motion = positive value)
     // factor for speed of 0.1 (from spreadsheet)
-    motion_avg.y *= -1.57;
+    motion_avg.y *= -1.57 * 4.0 / 3.0;
 
     // now apply deadband of 0.5 mm or so (so we don't accrue unnecessary noise errors)
     if(fabs(motion_avg.x) > 0.0005 || fabs(motion_avg.y) > 0.0005)

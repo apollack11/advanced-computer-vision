@@ -21,8 +21,6 @@
       <param name="world_frame" value="odom"/>
 
       <param name="odom0" value="/optical_flow/data"/>
-      <!-- <param name="imu0" value="/imu/test_data"/> -->
-      <param name="imu0" value="/imu/data"/>
 
       <!-- settings for using Pose -->
       <!-- <rosparam param="odom0_config">[true,  true,  true,
@@ -38,25 +36,7 @@
                                       false, false, true,
                                       false, false, false]</rosparam>
 
-      <!-- <rosparam param="imu0_config">[false, false, false,
-                                     true,  true,  true,
-                                     false, false, false,
-                                     true, true, true,
-                                     true, true, true]</rosparam> -->
-
-     <rosparam param="imu0_config">[false, false, false,
-                                    true,  true,  true,
-                                    false, false, false,
-                                    true, true, true,
-                                    false, false, false]</rosparam>
-
       <param name="odom0_differential" value="false"/>
-      <param name="imu0_differential" value="false"/>
-
-      <!-- <param name="imu0_remove_gravitational_acceleration" value="true"/> --> <!-- I don't think we want this -->
-
-      <!-- <param name="debug"           value="true"/>
-      <param name="debug_out_file"  value="debug_ekf.txt"/> -->
 
       <rosparam param="process_noise_covariance">[0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                                                   0.0, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -74,7 +54,7 @@
                                                   0.0, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0,
                                                   0.0, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.015]</rosparam>
 
-      <remap from="/odometry/filtered" to="/filter_test" />
+      <remap from="/odometry/filtered" to="/visual_odom" />
     </node>
 
 </launch>
