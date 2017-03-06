@@ -6,11 +6,10 @@ from geometry_msgs.msg import Pose2D
 
 class optical_flow_conversion:
     def __init__(self):
-        self.optical_flow_pub = rospy.Publisher('optical_flow/data', Odometry, queue_size=10)
+        self.optical_flow_pub = rospy.Publisher('optical_flow', Odometry, queue_size=10)
         self.optical_flow_sub = rospy.Subscriber('optical_flow/pose', Pose2D, self.callback)
         self.rate = rospy.Rate(30) # 30Hz because 30fps
         self.visual_odom = Odometry()
-        #self.quaternion = [0.0,0.0,0.0,0.0]
 
     def callback(self,data):
         self.quaternion = tf.transformations.quaternion_from_euler(0,0,data.theta)

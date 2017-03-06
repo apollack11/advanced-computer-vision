@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="eecs432_project" type="flow" name="optical_flow_pub" />
+    <include file="$(find eecs432_project)/launch/ekf_robot_localization.launch"/>
+    <include file="$(find eecs432_project)/launch/ekf_robot_localization_imu.launch"/>
+</launch>

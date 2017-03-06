@@ -1,4 +1,4 @@
-// ros and related stuff:
+// ROS and related stuff:
 #include <ros/ros.h>
 #include <sensor_msgs/image_encodings.h>
 #include <geometry_msgs/Pose2D.h>
@@ -13,16 +13,14 @@
 #include <cv_bridge/cv_bridge.h>
 #include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/highgui/highgui.hpp"
-// #include <opencv2/nonfree/features2d.hpp> // SurfFeatureDetector
-// #include <opencv2/legacy/legacy.hpp> // BruteForceMatcher
-#include <opencv2/video/tracking.hpp> // calcOpticalFlowPyrLK, estimateRigidTransform
+#include <opencv2/video/tracking.hpp> // calcOpticalFlowPyrLK
 
-// core c++ stuff:
+// core c++ headers:
 #include <iostream>
 #include <vector>
 #include <cmath> // sqrt
 #include <iomanip> // std::setw
-#include <algorithm>
+#include <algorithm> // a few things
 
 
 #define PI 3.1416 // mmm, delicious pi
@@ -44,10 +42,6 @@
 #define PIX_DEG_V 0.03781 // degrees subtended by each pixel in v direction
 #define PIX_RAD_U 0.00065 // radians subtended by each pixel in u direction
 #define PIX_RAD_V 0.00066 // radians subtended by each pixel in v direction
-
-// WE SHOULD CALCULATE DELTA TIME EACH FUNCTION CALL IF WE'RE GOING TO USE IT
-// SINCE ROS IS ASYNC AND COULD RUN INTO TROUBLE ASSUMING CONSTANT FREQ
-#define dt 0.033 // seconds expected between callbacks
 
 
 using namespace std;
@@ -85,7 +79,7 @@ private:
   // setup and generic stuff:
   int counter;
   string ColorWinName;
-  string GrayWinName;
+  // string GrayWinName;
   Mat out_img; // output image, marked up with flow points and stuff
 
   // camera calibration data:
@@ -111,6 +105,8 @@ private:
   // testing out Farneback's instead of LK to solve OF:
   Mat curr_track_indices_mat;
   // cv::Mat H; // Perspective Transformation (Homography) Matrix
+  // H MUST BE A Matx33d
+  // INVESTIGATE LATER, NO TIME TO DIVE INTO THIS NOW
   cv::Matx33d H; // Perspective Transformation (Homography) Matrix
 
   double t_curr;
@@ -152,20 +148,19 @@ public:
     projection_matrix = cv::Mat(3, 4, CV_32F, projection_matrix_data);
 
     double H_data[9] = {0.0002347417933653588, -9.613823951336309e-20, -0.07500000298023225, -7.422126200315807e-19, -0.0002818370786240783, 0.5159999728202818, 1.683477982667922e-19, 5.30242624981192e-18, 1};
-    // double H_data[9] = {7.663530590283282e-19, -0.0002818370786240823, 0.515999972820282, 0.000234741793365359, 5.35748339138345e-20, -0.07500000298023224, 2.155275334288567e-18, -2.683400376901623e-18, 1};
 
     H = cv::Mat(3, 3, CV_64F, H_data);
 
-    accumulated_xy = Point2f(0.0, 0.0);
-    accumulated_heading = 0.0;
-    accumulated_travel = 0.0;
+    // accumulated_xy = Point2f(0.0, 0.0);
     accumulated_motion = Point3f(0.0, 0.0, 0.0);
+    // accumulated_heading = 0.0;
+    // accumulated_travel = 0.0;
 
     counter = 0.0;
 
     // THIS IS JUST FOR DEVELOPMENT PURPOSES:
-    const Point2f dataz1[] = {Point2f(0.0, 0.0), Point2f(639.0, 0.0), Point2f(0.0, 479.0), Point2f(639.0, 479.0)};
-    const Point2f dataz2[] = {Point2f(-0.075, 0.516), Point2f(0.075, 0.516), Point2f(-0.075, 0.381), Point2f(0.075, 0.381)};
+    // const Point2f dataz1[] = {Point2f(0.0, 0.0), Point2f(639.0, 0.0), Point2f(0.0, 479.0), Point2f(639.0, 479.0)};
+    // const Point2f dataz2[] = {Point2f(-0.075, 0.516), Point2f(0.075, 0.516), Point2f(-0.075, 0.381), Point2f(0.075, 0.381)};
     // const Point2f dataz2[] = {Point2f(0.516, -0.075), Point2f(0.516, 0.075), Point2f(0.381, -0.075), Point2f(0.381, 0.075)};
 
     // float turn_rad = 0.381 // meters, from center of robot to base of visible trapezoid
@@ -173,7 +168,7 @@ public:
     // float trap_top = 0.15; // meters, top of trapezoid visible to camera
     // float trap_height = 0.135; // meters, h
 
-    cout << "HOMOGRAPHY / PERSPECTIVE PROJECTION = \n" << cv::getPerspectiveTransform(dataz1, dataz2) << endl;
+    // cout << "HOMOGRAPHY / PERSPECTIVE PROJECTION = \n" << cv::getPerspectiveTransform(dataz1, dataz2) << endl;
 
     t_prev = ros::Time::now().toSec();
 
@@ -219,7 +214,6 @@ public:
       // create vector of good points to track from previous image
       goodFeaturesToTrack(prev, prev_track_indices, MAX_POINTS, 0.1, 5.0);
     }
-    // cout << "prev_track_indices.size(): " << prev_track_indices.size() << endl;
 
     if(prev_track_indices.empty()) // check, even though we shouldn't have this problem
     {
@@ -228,32 +222,29 @@ public:
       return;
     }
 
-    // find optical flow between previous and current images, store in curr_track_indices
-    // TRY USING PYRAMIDS INSTEAD? I THINK calcOpticalFlowPyrLK ALREADY USES PYRAMIDS, JUST CREATES THEM AUTOMATICALLY INSTEAD OF ME DOING THEM FIRST, GIVING ME LESS CONTROL OVER PARAMETERS
+    // find optical flow between previous and current images
     calcOpticalFlowPyrLK(prev, curr, prev_track_indices, curr_track_indices, flow_status, flow_errs, Size(21,21), 4);
-    // cout << "prev_track_indices:\n" << prev_track_indices << endl;
-    // cout << "curr_track_indices:\n" << curr_track_indices << endl;
 
     // NOT SURE WE NEED THIS CHECK, BUT ONE OF MY CUSTOM FUNCTIONS STATES WE HAVE IT:
     if(curr_track_indices.size() != prev_track_indices.size())
     { ROS_ERROR("tracking index data size different between previous and current images"); }
 
     // Point2f derp = uv_left_right(prev_track_indices, curr_track_indices);
-    float derpdyderp = estimate_heading(prev_track_indices, curr_track_indices);
+    // float derpdyderp = estimate_heading(prev_track_indices, curr_track_indices);
     // THIS PART CURRENTLY ONLY WORKS WELL WHEN THERE ARE > 50 TRACKING POINTS
     // AND ALSO AT ~0.5 TURNING SPEED. AT 0.1 IT OVERESTIMATED (90deg WAS MEASURED AS 120deg)
-    accumulated_heading += derpdyderp * 57.29; // converted to degrees just for visualization for now
 
     // float derp2 = uv_fore_aft(prev_track_indices, curr_track_indices);
-    float derp2 = estimate_travel(prev_track_indices, curr_track_indices);
-    accumulated_travel += derp2;
+    // float derp2 = estimate_travel(prev_track_indices, curr_track_indices);
 
     derpz = estimate_motion(prev_track_indices, curr_track_indices);
     accumulated_motion += derpz;
-    cout << "ACCUMULATED MOVEMENT = " << accumulated_motion << endl;
+    cout << "ACCUMULATED MOVEMENT = " << accumulated_motion << ", ANGLE = " << accumulated_motion.x / (2 * PI * 0.4485) * 360 * 1.57 << endl;
     // x movement multiplied by circumference (2 * PI * Radius) multiplied by 360 (to convert to degrees)
     // also multiplied by a constant of 1.57 based on test data
-    cout << "ANGLE = " << accumulated_motion.x / (2 * PI * 0.4485) * 360 * 1.57 << endl;
+    // cout << "ANGLE = " << accumulated_motion.x / (2 * PI * 0.4485) * 360 * 1.57 << endl;
+    // accumulated_travel += derp2;
+    // accumulated_heading += derpdyderp * 57.29; // converted to degrees just for visualization for now
 
     // if(derpdyderp > 0.001 || derp2 > 0.1)
     // {
@@ -268,7 +259,6 @@ public:
 
     // helpful clarification:
     // http://stackoverflow.com/questions/16639106/camera-motion-from-corresponding-images
-
     // syntax inspiration found at:
     // http://www.morethantechnical.com/2012/02/07/structure-from-motion-and-3d-reconstruction-on-the-easy-in-opencv-2-3-w-code/
     SVD svd(E);
@@ -543,7 +533,7 @@ public:
     {
       return Point3f(0.0, 0.0, 0.0);
     }
-  } // END OF FUNCTION estimate_motion() ###################################
+  } // END OF FUNCTION estimate_motion() #######################################
 
 
   float estimate_heading(vector<Point2f> &prev_coords, vector<Point2f> &curr_coords)
@@ -602,6 +592,8 @@ public:
   {
     // function to calculate the z coordinate change from frame-to-frame
     // used to estimate camera motion relative to world
+
+
     // int top = CAM_PIX_V * 2/3;
     // int bot = CAM_PIX_V * 1/3; // ignoring middle 1/3 of image
     // int top_count = 0;
@@ -638,10 +630,7 @@ public:
     // }
 
 
-
-
     // DO RADIAL INSTEAD OF TOP/BOT DIFFERENTIAL
-
     float x_prev;
     float y_prev;
     float x_curr;
@@ -653,20 +642,12 @@ public:
     float x_radial;
     float y_radial;
     float radial;
-    // double x_rad_tot = 0;
-    // double y_rad_tot = 0;
     double radial_tot = 0;
-    // Point2f mid;
-    // Point2f dir;
-    // cv::Mat mid1,2,CV_32FC1,a);
-    // cv::Mat BB(1,2,CV_32FC1,b);
-
 
     vector<Point2f>::iterator it1 = prev_coords.begin(); // sizes should already
     vector<Point2f>::iterator it2 = curr_coords.begin(); // be verified equal
     for( ; it2 != curr_coords.end(); ++it1, ++it2)
-    {
-      // loop through and find y-component of motion for all matching points
+    { // loop through and find y-component of motion for all matching points
       x_prev = (*it1).x;
       y_prev = (*it1).y;
       x_curr = (*it2).x;
@@ -680,10 +661,9 @@ public:
       radial = x_radial + y_radial;
       radial_tot += radial;
     }
-    double radial_avg = radial_tot/prev_coords.size(); // only care about average radial motion
-    return (radial_avg > 5 ? radial_avg : 0);
-    // return sqrt(pow(x_rad_tot, 2) + pow(y_rad_tot, 2)); // THIS WAS DEFINITELY WRONG, WHOOPS
 
+    double radial_avg = radial_tot/prev_coords.size(); // only care about average radial motion
+    return (radial_avg > 5 ? radial_avg : 0); // deadband of 5 pixels
   } // END OF FUNCTION uv_fore_aft() ###########################################
 
 
@@ -722,7 +702,7 @@ public:
     }
 
     return;
-  } // END OF FUNCTION RemoveOutOfBounds() ##########################################
+  } // END OF FUNCTION RemoveOutOfBounds() #####################################
 
 }; // END OF CLASS FlowCalculator ##############################################
 
@@ -736,46 +716,3 @@ int main(int argc, char** argv)
   ros::spin();
   return 0;
 }
-
-    // undistort image (before calculating Fundamental Matrix) - turns out to be too laggy
-    // try undistorting only tracked points instead (before calculating Fundamental Matrix)
-    // http://stackoverflow.com/questions/25251676/opencv-findfundamentalmat-very-unstable-and-sensitive
-    // undistortPoints(curr_track_indices, curr_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
-    // undistortPoints(prev_track_indices, prev_track_undistorted, camera_matrix, distortion_coefficients);//, rectification_matrix, projection_matrix);
-    // DOES THIS WORK WITH INDICES OR ACTUAL POINT DATA???? SHOULD BE INDICES, BUT GETTING NANS
-    // The function can be used for both a stereo camera head or a monocular camera (when R is empty).
-    // ^ DOES THIS MEAN I SHOULDN'T BE USIN R OR P (rectification_matrix OR projection_matrix)?
-
-    // undistorting using built-in function isn't working, try homebrew solution instead:
-    // prev_track_undistorted = normalize(prev_track_indices);
-    // curr_track_undistorted = normalize(curr_track_indices);
-    // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
-    // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
-
-    // center data per Wu's lecture 12
-    // prev_track_centered = centerData(prev_track_indices);
-    // curr_track_centered = centerData(curr_track_indices);
-    // prev_track_centered = centerData(prev_track_undistorted);
-    // curr_track_centered = centerData(curr_track_undistorted);
-    // cout << "prev_track_centered:\n" << prev_track_centered << endl;
-    // cout << "curr_track_centered:\n" << curr_track_centered << endl;
-
-    // DOING THIS AFTER UNDISTORTING THROWS OFF RESULTS (SINCE POINTS ARE NOW IN CAM COORDS INSTEAD OF PIXELS)
-    // Point2f derp = uv_left_right(prev_track_undistorted, curr_track_undistorted);
-    // accumulated_xy += derp * PIX_RAD_U * 57.29; // converted to degrees just for visualization for now
-    // // cout << "(u, v) = " << setw(12) << derp.x << ", " << setw(12) << derp.y << endl;
-    // cout << "accumulated u, v = " << setw(12) << accumulated_xy.x << ", " << setw(12) << accumulated_xy.y << endl;
-
-    // comparison of findFundamentalMat solver techniques:
-    // http://fhtagn.net/prog/2012/09/27/opencv-fundamentalmat.html
-    // per this, may be better to use LMedS instead of RANSAC...
-    // F = findFundamentalMat(prev_track_indices, curr_track_undistorted, FM_RANSAC, 1, 0.99, F_indices_mask);
-    // F = findFundamentalMat(prev_track_indices, curr_track_indices, FM_RANSAC, 1, 0.99, flow_status);
-    // ransac sucks, how about this?:
-    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_LMEDS, 1, 0.99, F_indices_mask);
-    // that sucked too, how about this?:
-    // F = findFundamentalMat(prev_track_indices, curr_track_indices, CV_FM_8POINT, 1, 0.99, F_indices_mask);
-    // welp, they all suck. back to the drawing board
-    // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 1, 0.99, F_indices_mask);
-    // F = findFundamentalMat(prev_track_centered, curr_track_centered, FM_RANSAC, 0.01, 0.99, F_indices_mask); // 0.01 is guess
-    // cout << "F:\n" << F << endl;

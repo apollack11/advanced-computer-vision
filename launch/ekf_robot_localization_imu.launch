@@ -45,7 +45,7 @@
                                                   0.0, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.0,
                                                   0.0, 0.0, 0.0, 0.0, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.015]</rosparam>
 
-      <remap from="/odometry/filtered" to="/imu/odometry" />
+      <remap from="/odometry/filtered" to="/odometry/imu" />
     </node>
 
 </launch>

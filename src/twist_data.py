@@ -6,7 +6,7 @@ from geometry_msgs.msg import Twist
 
 class optical_flow_conversion:
     def __init__(self):
-        self.optical_flow_pub = rospy.Publisher('optical_flow/data', Odometry, queue_size=10)
+        self.optical_flow_pub = rospy.Publisher('optical_flow', Odometry, queue_size=10)
         self.optical_flow_sub = rospy.Subscriber('optical_flow/twist', Twist, self.callback)
         self.rate = rospy.Rate(30) # 30Hz because 30fps
         self.visual_odom = Odometry()
