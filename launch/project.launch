@@ -1,5 +1,6 @@
 <launch>
     <node pkg="eecs432_project" type="flow" name="optical_flow_pub" />
+    <node pkg="eecs432_project" type="twist_data.py" name="data_converter" />
     <include file="$(find eecs432_project)/launch/ekf_robot_localization.launch"/>
     <include file="$(find eecs432_project)/launch/ekf_robot_localization_imu.launch"/>
 </launch>
