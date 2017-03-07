@@ -41,6 +41,12 @@ public:
   geometry_msgs::Twist visual_twist;
   geometry_msgs::Twist jackal_twist;
 
+  // twists at time t-1 (for deriv calcs):
+  geometry_msgs::Twist imu_data_twist_prev;
+  geometry_msgs::Twist imu_odo_twist_prev;
+  geometry_msgs::Twist visual_twist_prev;
+  geometry_msgs::Twist jackal_twist_prev;
+
   // use geometry_msgs::Twist containers to store relevant accels:
   geometry_msgs::Twist imu_data_accel;
   geometry_msgs::Twist imu_odo_accel;
@@ -98,12 +104,14 @@ private:
     imu_data_twist.angular.z = msg->angular_velocity.z;
 
     // then derive remainder from stored data
-    imu_data_twist.linear.x = imu_data_accel.linear.x * dt;
-    imu_data_twist.linear.y = imu_data_accel.linear.y * dt;
-    imu_data_twist.linear.z = imu_data_accel.linear.z * dt;
-    imu_data_accel.angular.x = imu_data_twist.angular.x / dt;
-    imu_data_accel.angular.y = imu_data_twist.angular.y / dt;
-    imu_data_accel.angular.z = imu_data_twist.angular.z / dt;
+    // imu_data_twist.linear.x = imu_data_accel.linear.x * dt;
+    // imu_data_twist.linear.y = imu_data_accel.linear.y * dt;
+    // imu_data_twist.linear.z = imu_data_accel.linear.z * dt;
+    imu_data_accel.angular.x = (imu_data_twist.angular.x - imu_data_twist_prev.angular.x)/ dt;
+    imu_data_accel.angular.y = (imu_data_twist.angular.y - imu_data_twist_prev.angular.y) / dt;
+    imu_data_accel.angular.z = (imu_data_twist.angular.z - imu_data_twist_prev.angular.z) / dt;
+
+    imu_data_twist_prev = imu_data_twist; // for next round
 
     t_prev_imu_data = t_curr; // update time for next call
 
@@ -136,12 +144,14 @@ private:
     imu_odo_twist.angular.z = msg->twist.twist.angular.z;
 
     // calculate accel data
-    imu_odo_accel.linear.x = imu_odo_twist.linear.x / dt;
-    imu_odo_accel.linear.y = imu_odo_twist.linear.y / dt;
-    imu_odo_accel.linear.z = imu_odo_twist.linear.z / dt;
-    imu_odo_accel.angular.x = imu_odo_twist.angular.x / dt;
-    imu_odo_accel.angular.y = imu_odo_twist.angular.y / dt;
-    imu_odo_accel.angular.z = imu_odo_twist.angular.z / dt;
+    imu_odo_accel.linear.x = (imu_odo_twist.linear.x - imu_odo_twist_prev.linear.x) / dt;
+    imu_odo_accel.linear.y = (imu_odo_twist.linear.y - imu_odo_twist_prev.linear.y) / dt;
+    imu_odo_accel.linear.z = (imu_odo_twist.linear.z - imu_odo_twist_prev.linear.z) / dt;
+    imu_odo_accel.angular.x = (imu_odo_twist.angular.x - imu_odo_twist_prev.angular.x) / dt;
+    imu_odo_accel.angular.y = (imu_odo_twist.angular.y - imu_odo_twist_prev.angular.y) / dt;
+    imu_odo_accel.angular.z = (imu_odo_twist.angular.z - imu_odo_twist_prev.angular.z) / dt;
+
+    imu_odo_twist_prev = imu_odo_twist; // for next round
 
     t_prev_imu_odo = t_curr; // update time for next call
 
@@ -174,12 +184,14 @@ private:
     visual_twist.angular.z = msg->twist.twist.angular.z;
 
     // calculate accel data
-    visual_accel.linear.x = visual_twist.linear.x / dt;
-    visual_accel.linear.y = visual_twist.linear.y / dt;
-    visual_accel.linear.z = visual_twist.linear.z / dt;
-    visual_accel.angular.x = visual_twist.angular.x / dt;
-    visual_accel.angular.y = visual_twist.angular.y / dt;
-    visual_accel.angular.z = visual_twist.angular.z / dt;
+    visual_accel.linear.x = (visual_twist.linear.x - visual_twist_prev.linear.x) / dt;
+    visual_accel.linear.y = (visual_twist.linear.y - visual_twist_prev.linear.y) / dt;
+    visual_accel.linear.z = (visual_twist.linear.z - visual_twist_prev.linear.z) / dt;
+    visual_accel.angular.x = (visual_twist.angular.x - visual_twist_prev.angular.x) / dt;
+    visual_accel.angular.y = (visual_twist.angular.y - visual_twist_prev.angular.y) / dt;
+    visual_accel.angular.z = (visual_twist.angular.z - visual_twist_prev.angular.z) / dt;
+
+    visual_twist_prev = visual_twist; // for next round
 
     t_prev_visual = t_curr; // update time for next call
 
@@ -212,12 +224,14 @@ private:
     jackal_twist.angular.z = msg->twist.twist.angular.z;
 
     // calculate accel data
-    jackal_accel.linear.x = jackal_twist.linear.x / dt;
-    jackal_accel.linear.y = jackal_twist.linear.y / dt;
-    jackal_accel.linear.z = jackal_twist.linear.z / dt;
-    jackal_accel.angular.x = jackal_twist.angular.x / dt;
-    jackal_accel.angular.y = jackal_twist.angular.y / dt;
-    jackal_accel.angular.z = jackal_twist.angular.z / dt;
+    jackal_accel.linear.x = (jackal_twist.linear.x - jackal_twist_prev.linear.x) / dt;
+    jackal_accel.linear.y = (jackal_twist.linear.y - jackal_twist_prev.linear.y) / dt;
+    jackal_accel.linear.z = (jackal_twist.linear.z - jackal_twist_prev.linear.z) / dt;
+    jackal_accel.angular.x = (jackal_twist.angular.x - jackal_twist_prev.angular.x) / dt;
+    jackal_accel.angular.y = (jackal_twist.angular.y - jackal_twist_prev.angular.y) / dt;
+    jackal_accel.angular.z = (jackal_twist.angular.z - jackal_twist_prev.angular.z) / dt;
+
+    jackal_twist_prev = jackal_twist; // for next round
 
     t_prev_jackal = t_curr; // update time for next call
 
