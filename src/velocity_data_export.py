@@ -23,14 +23,14 @@ class data_export:
         imu_odom.append([x,x_vel,yaw,yaw_vel])
 
     def wheel_odom_callback(self,data):
-        x = data.pose.pose.orientation.x
+        x = data.pose.pose.position.x
         x_vel = data.twist.twist.linear.x
         yaw = data.pose.pose.orientation.x
         yaw_vel = data.twist.twist.angular.z
         wheel_odom.append([x,x_vel,yaw,yaw_vel])
 
     def visual_odom_callback(self,data):
-        x = data.pose.pose.orientation.x
+        x = data.pose.pose.position.x
         x_vel = data.twist.twist.linear.x
         yaw = data.pose.pose.orientation.x
         yaw_vel = data.twist.twist.angular.z
