@@ -1,0 +1,6 @@
+stationary = not moving
+linear1 = linear at half low speed
+linear2 = linear at full low speed
+linear3 = linear at full high speed
+rot1 = rotation at half low speed
+rot2 = rotation at full low speed

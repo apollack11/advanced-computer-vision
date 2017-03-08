@@ -24,12 +24,18 @@ class optical_flow_conversion:
 
         self.visual_odom.header.frame_id = 'front_camera_optical'
         self.visual_odom.header.stamp = self.current_time
-        self.visual_odom.twist.covariance[0] = 0.001
+        self.visual_odom.twist.covariance[0] = 0.5
         self.visual_odom.twist.covariance[7] = 0.001
         self.visual_odom.twist.covariance[14] = 0.001
         self.visual_odom.twist.covariance[21] = 1000000.0
         self.visual_odom.twist.covariance[28] = 1000000.0
         self.visual_odom.twist.covariance[35] = 0.03
+        # self.visual_odom.twist.covariance[0] = 0.001
+        # self.visual_odom.twist.covariance[7] = 0.001
+        # self.visual_odom.twist.covariance[14] = 0.001
+        # self.visual_odom.twist.covariance[21] = 1000000.0
+        # self.visual_odom.twist.covariance[28] = 1000000.0
+        # self.visual_odom.twist.covariance[35] = 0.03
 
         self.optical_flow_pub.publish(self.visual_odom)
         self.rate.sleep()

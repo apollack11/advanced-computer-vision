@@ -43,7 +43,7 @@
                                     true,  true,  true,
                                     false, false, false,
                                     true, true, true,
-                                    false, false, false]</rosparam>
+                                    true, true, true]</rosparam>
 
       <param name="odom0_differential" value="false"/>
       <param name="imu0_differential" value="false"/>
