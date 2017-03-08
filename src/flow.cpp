@@ -112,6 +112,9 @@ private:
   double t_curr;
   double t_prev;
 
+  geometry_msgs::Twist filter[5];
+  int filter_count;
+
 
 public:
   FlowCalculator()
@@ -172,6 +175,19 @@ public:
 
     t_prev = ros::Time::now().toSec();
 
+    geometry_msgs::Twist blah;
+    blah.linear.x = 0;
+    blah.linear.y = 0;
+    blah.linear.z = 0;
+    blah.angular.x = 0;
+    blah.angular.y = 0;
+    blah.angular.z = 0;
+
+    for(int i = 0; i < 5; ++i)
+    {
+      filter[i] = blah;
+    }
+    filter_count = 0;
 
   } // END OF CONSTRUCTOR ######################################################
 
@@ -296,16 +312,39 @@ public:
     // }
 
     // package and send output pose to EKF
-    pose_out.x = accumulated_motion.y;
-    pose_out.y = 0;
-    pose_out.theta = accumulated_motion.x / (2 * PI * 0.4485) * 2 * PI * 1.57;
-    pose_pub.publish(pose_out);
+    // pose_out.x = accumulated_motion.y;
+    // pose_out.y = 0;
+    // pose_out.theta = accumulated_motion.x / (2 * PI * 0.4485) * 2 * PI * 1.57;
+    // pose_pub.publish(pose_out);
 
     // trying to do twist output instead:
     t_curr = ros::Time::now().toSec();
     twist_out.linear.x = derpz.y / (t_curr - t_prev);
     twist_out.angular.z = derpz.x / (2 * PI * 0.4485) * 2 * PI * 1.57 / (t_curr - t_prev);
+
+    filter[filter_count] = twist_out;
+
+    twist_out.linear.x = 0;
+    twist_out.linear.y = 0;
+    twist_out.linear.z = 0;
+    twist_out.angular.x = 0;
+    twist_out.angular.y = 0;
+    twist_out.angular.z = 0;
+    for(int i = 0; i < 5; ++i)
+    {
+      twist_out.linear.x += filter[i].linear.x / 5;
+      twist_out.linear.y += filter[i].linear.y / 5;
+      twist_out.linear.z += filter[i].linear.z / 5;
+      twist_out.angular.x += filter[i].angular.x / 5;
+      twist_out.angular.y += filter[i].angular.y / 5;
+      twist_out.angular.z += filter[i].angular.z / 5;
+    }
+
+
+
     twist_pub.publish(twist_out);
+
+    ++filter_count %= 5;
 
 
     // draw tracked points for visualization purposes

@@ -191,6 +191,8 @@ private:
     visual_accel.angular.y = (visual_twist.angular.y - visual_twist_prev.angular.y) / dt;
     visual_accel.angular.z = (visual_twist.angular.z - visual_twist_prev.angular.z) / dt;
 
+    // cout << "visual_twist: curr, prev, dt = " << setw(12) << visual_twist.angular.z  << setw(12) << visual_twist_prev.angular.z  << setw(12) << dt << endl;
+
     visual_twist_prev = visual_twist; // for next round
 
     t_prev_visual = t_curr; // update time for next call
@@ -257,16 +259,16 @@ int main(int argc, char** argv)
   int j = 0; // counter
   while(ros::ok())
   {
-    if(j == 0)
-    { // print out heading info:
-      cout << endl;
-      cout << setw(3 * WIDTH) << "JACKAL:" << setw(3 * WIDTH) << "VISUAL:" << setw(3 * WIDTH) << "IMU:" << endl;
-      for(int i = 0; i < 3; ++i)
-      { // 3 topics, 3 sets of columns
-        cout << setw(WIDTH) << "x:" << setw(WIDTH) << "y:" << setw(WIDTH) << "theta:";
-      }
-      cout << endl;
-    }
+    // if(j == 0)
+    // { // print out heading info:
+    //   cout << endl;
+    //   cout << setw(3 * WIDTH) << "JACKAL:" << setw(3 * WIDTH) << "VISUAL:" << setw(3 * WIDTH) << "IMU:" << endl;
+    //   for(int i = 0; i < 3; ++i)
+    //   { // 3 topics, 3 sets of columns
+    //     cout << setw(WIDTH) << "x:" << setw(WIDTH) << "y:" << setw(WIDTH) << "theta:";
+    //   }
+    //   cout << endl;
+    // }
 
     // print out pose info:
     // cout << setw(WIDTH) << c.jackal_pose.x << setw(WIDTH) << c.jackal_pose.y << setw(WIDTH) << c.jackal_pose.theta;
