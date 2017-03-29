@@ -3,7 +3,7 @@ Final project for EECS432 Advanced Computer Vision
 
 ## Contents
 
-#### Nodes  
+### Nodes  
 **flow.cpp**  
 Extracts features, calculates optical flow, and performs perspective transform on a live camera feed. Publishes a Twist message to `/optical_flow/twist` which contains twist data in the form of velocity in x, y, z, roll, pitch, and yaw
 
@@ -13,7 +13,7 @@ Converts output of `flow.cpp` from a Twist message to an Odometry message which 
 **robot_localization**  
 ROS package used to perform sensor fusion with multiple streams of data and convert the output to position and velocity in x, y, z, roll, pitch, yaw. The default publisher publishes to `/odometry/filtered`
 
-#### Launch Files  
+### Launch Files  
 **project.launch**  
 Launches both the `ekf_robot_localization.launch` launch and the `ekf_robot_localization_imu.launch` launch file. Publishes Odometry messages to `/odometry/visual` and `/odometry/imu`
 
