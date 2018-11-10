@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(eecs432_project)
 
 ## Add support for C++11, supported in ROS Kinetic and newer
-# add_definitions(-std=c++11)
+add_definitions(-std=c++11)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -123,7 +123,7 @@ catkin_package(
 
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
-# include_directories(include)
+include_directories(include)
 include_directories(
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
@@ -133,6 +133,9 @@ include_directories(
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/eecs432_project.cpp
 # )
+
+ADD_LIBRARY(utils_lib src/utils.cpp)
+TARGET_LINK_LIBRARIES(utils_lib ${catkin_LIBRARIES} ${OpenCV_LIBS})
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -209,7 +212,7 @@ include_directories(
 # catkin_add_nosetests(test)
 
 ADD_EXECUTABLE(flow src/flow.cpp)
-TARGET_LINK_LIBRARIES(flow ${catkin_LIBRARIES} ${OpenCV_LIBS})
+TARGET_LINK_LIBRARIES(flow ${catkin_LIBRARIES} ${OpenCV_LIBS} utils_lib)
 
 ADD_EXECUTABLE(compare src/compare.cpp)
 TARGET_LINK_LIBRARIES(compare ${catkin_LIBRARIES})
