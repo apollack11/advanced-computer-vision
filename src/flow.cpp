@@ -54,20 +54,19 @@ class FlowCalculator {
   // set up ROS
   ros::NodeHandle nh_;
   image_transport::ImageTransport it_;
-  image_transport::Subscriber image_sub;
-  ros::Publisher pose_pub;
-  ros::Publisher twist_pub;
+  image_transport::Subscriber image_sub_;
+  ros::Publisher pose_pub_;
+  ros::Publisher twist_pub_;
 
   // image structures and indices:
-  cv::Mat curr_color;
-  cv::Mat curr;
-  cv::Mat prev;
-  std::vector<cv::Point2f> curr_track_indices;
-  std::vector<cv::Point2f> prev_track_indices;
-  std::vector<cv::Point2f> prev_track_centered;
-  std::vector<cv::Point2f> curr_track_centered;
-  std::vector<cv::Point2f> curr_track_undistorted;
-  std::vector<cv::Point2f> prev_track_undistorted;
+  cv::Mat curr_;
+  cv::Mat prev_;
+  std::vector<cv::Point2f> curr_track_indices_;
+  std::vector<cv::Point2f> prev_track_indices_;
+  //std::vector<cv::Point2f> prev_track_centered;
+  //std::vector<cv::Point2f> curr_track_centered;
+  //std::vector<cv::Point2f> curr_track_undistorted;
+  //std::vector<cv::Point2f> prev_track_undistorted;
 
   // optical flow, Fundamental & Essential matrices:
   cv::Matx33d F; // Fundamental Matrix
@@ -115,12 +114,12 @@ class FlowCalculator {
       filter(5)
   {
     // subscribe to input video stream from camera
-    image_sub = it_.subscribe("/usb_cam/image_raw", 1, &FlowCalculator::img_cb, this, image_transport::TransportHints("compressed"));
-    // image_sub = it_.subscribe("/camera/image_color", 1, &FlowCalculator::img_cb, this, image_transport::TransportHints("compressed"));
+    image_sub_ = it_.subscribe("/usb_cam/image_raw", 1, &FlowCalculator::img_cb, this, image_transport::TransportHints("compressed"));
+    // image_sub_ = it_.subscribe("/camera/image_color", 1, &FlowCalculator::img_cb, this, image_transport::TransportHints("compressed"));
 
     // publish output pose estimate to EKF
-    pose_pub = nh_.advertise<geometry_msgs::Pose2D>("/optical_flow/pose", 1);
-    twist_pub = nh_.advertise<geometry_msgs::Twist>("/optical_flow/twist", 1);
+    pose_pub_ = nh_.advertise<geometry_msgs::Pose2D>("/optical_flow/pose", 1);
+    twist_pub_ = nh_.advertise<geometry_msgs::Twist>("/optical_flow/twist", 1);
 
     // create a single window instance, overwrite each loop
     cv::namedWindow(ColorWinName, cv::WINDOW_AUTOSIZE);
@@ -177,6 +176,7 @@ class FlowCalculator {
 
   void img_cb(const sensor_msgs::ImageConstPtr& input) {
     // grab current frame from camera stream
+    cv::Mat curr_color;
     try {
       curr_color = (cv_bridge::toCvCopy(input, sensor_msgs::image_encodings::BGR8))->image;
     }
@@ -184,12 +184,12 @@ class FlowCalculator {
       ROS_ERROR("cv_bridge exception: %s", e.what());
       return;
     }
-    cv::cvtColor(curr_color, curr, CV_BGR2GRAY); // create curr (grayscale version of the input image)
+    cv::cvtColor(curr_color, curr_, CV_BGR2GRAY); // create curr_ (grayscale version of the input image)
 
-    if (!prev.data) {
+    if (!prev_.data) {
       // Check for invalid input, also handles 1st time being called
-      ROS_WARN("prev image data not available, assigning to curr data");
-      curr.copyTo(prev);
+      ROS_WARN("prev_ image data not available, assigning to curr_ data");
+      curr_.copyTo(prev_);
       return;
     }
 
@@ -200,12 +200,12 @@ class FlowCalculator {
 
     // If enough tracking indices were dropped since the last frame, calculate a
     // new set.
-    if (prev_track_indices.size() < 0.75*MAX_POINTS) {
-      goodFeaturesToTrack(prev, prev_track_indices, MAX_POINTS, 0.1, 5.0);
+    if (prev_track_indices_.size() < 0.75*MAX_POINTS) {
+      goodFeaturesToTrack(prev_, prev_track_indices_, MAX_POINTS, 0.1, 5.0);
       // Verify the call to `goodFeaturesToTrack` was successful.
-      if (prev_track_indices.empty()) {
+      if (prev_track_indices_.empty()) {
         ROS_WARN("no tracking objects found");
-        curr.copyTo(prev);
+        curr_.copyTo(prev_);
         return;
       }
     }
@@ -214,20 +214,20 @@ class FlowCalculator {
     // find optical flow between previous and current images
     std::vector<float> flow_errs;
     std::vector<unsigned char> flow_status;
-    cv::calcOpticalFlowPyrLK(prev, curr, prev_track_indices, curr_track_indices, flow_status, flow_errs, cv::Size(21, 21), 4);
+    cv::calcOpticalFlowPyrLK(prev_, curr_, prev_track_indices_, curr_track_indices_, flow_status, flow_errs, cv::Size(21, 21), 4);
 
     // NOT SURE WE NEED THIS CHECK, BUT ONE OF MY CUSTOM FUNCTIONS STATES WE HAVE IT:
-    if (curr_track_indices.size() != prev_track_indices.size()) {
+    if (curr_track_indices_.size() != prev_track_indices_.size()) {
       ROS_ERROR("tracking index data size different between previous and current images");
     }
 
-    // Point2f derp = uv_left_right(prev_track_indices, curr_track_indices);
-    // float derpdyderp = estimate_heading(prev_track_indices, curr_track_indices);
+    // Point2f derp = uv_left_right(prev_track_indices_, curr_track_indices_);
+    // float derpdyderp = estimate_heading(prev_track_indices_, curr_track_indices_);
     // THIS PART CURRENTLY ONLY WORKS WELL WHEN THERE ARE > 50 TRACKING POINTS
     // AND ALSO AT ~0.5 TURNING SPEED. AT 0.1 IT OVERESTIMATED (90deg WAS MEASURED AS 120deg)
 
-    // float derp2 = uv_fore_aft(prev_track_indices, curr_track_indices);
-    // float derp2 = estimate_travel(prev_track_indices, curr_track_indices);
+    // float derp2 = uv_fore_aft(prev_track_indices_, curr_track_indices_);
+    // float derp2 = estimate_travel(prev_track_indices_, curr_track_indices_);
 
     // x movement multiplied by circumference (2 * PI * Radius) multiplied by 360 (to convert to degrees)
     // also multiplied by a constant of 1.57 based on test data
@@ -236,13 +236,13 @@ class FlowCalculator {
     // accumulated_heading += derpdyderp * 57.29; // converted to degrees just for visualization for now
 
     // if(derpdyderp > 0.001 || derp2 > 0.1) {
-      // cout << "(#=" << prev_track_indices.size() << ")\tyaw, forward motion = " << setw(10) << accumulated_heading << ", " << setw(10) << accumulated_travel << endl;
+      // cout << "(#=" << prev_track_indices_.size() << ")\tyaw, forward motion = " << setw(10) << accumulated_heading << ", " << setw(10) << accumulated_travel << endl;
     // }
 
     // comparison of findFundamentalMat solver techniques:
     // http://fhtagn.net/prog/2012/09/27/opencv-fundamentalmat.html
     // per this, may be better to use LMedS instead of RANSAC...
-    F = findFundamentalMat(prev_track_indices, curr_track_indices, cv::FM_RANSAC, 1, 0.99, flow_status);
+    F = findFundamentalMat(prev_track_indices_, curr_track_indices_, cv::FM_RANSAC, 1, 0.99, flow_status);
     E = camera_matrix.t() * F * camera_matrix; // calculate Essential matrix from Fundamental matrix and camera matrix
 
     // helpful clarification:
@@ -265,15 +265,15 @@ class FlowCalculator {
 
     // if(!(counter%15)) {
     // every 1/2 second, print:
-    //   // cout << "curr_track_indices:\n" << curr_track_indices << endl;
-    //   // cout << "prev_track_indices:\n" << prev_track_indices << endl;
-    //   // cout << "sizes of each:\t" << curr_track_indices.size() << '\t' << prev_track_indices.size() << endl;
+    //   // cout << "curr_track_indices_:\n" << curr_track_indices_ << endl;
+    //   // cout << "prev_track_indices_:\n" << prev_track_indices_ << endl;
+    //   // cout << "sizes of each:\t" << curr_track_indices_.size() << '\t' << prev_track_indices_.size() << endl;
     //   // cout << "curr_track_undistorted:\n" << curr_track_undistorted << endl;
     //   // cout << "prev_track_undistorted:\n" << prev_track_undistorted << endl;
     //   // cout << "curr_track_centered:\n" << curr_track_centered << endl;
     //   // cout << "prev_track_centered:\n" << prev_track_centered << endl;
-    //   // cout << "curr pixel val:\n" << curr.at<cv::Vec3b>(30,30) << endl;
-    //   // cout << "prev pixel val:\n" << prev.at<cv::Vec3b>(30,30) << endl;
+    //   // cout << "curr_ pixel val:\n" << curr_.at<cv::Vec3b>(30,30) << endl;
+    //   // cout << "prev_ pixel val:\n" << prev_.at<cv::Vec3b>(30,30) << endl;
     //   cout << "F:\n" << F << endl;
     //   cout << "E:\n" << E << endl;
     //   cout << "R:\n" << R << endl;
@@ -286,10 +286,10 @@ class FlowCalculator {
     // pose_out.x = accumulated_motion.y;
     // pose_out.y = 0;
     // pose_out.theta = accumulated_motion.x / (2 * PI * 0.4485) * 2 * PI * 1.57;
-    // pose_pub.publish(pose_out);
+    // pose_pub_.publish(pose_out);
 
     const cv::Point3f motion =
-        estimateMotion(prev_track_indices, curr_track_indices);
+        estimateMotion(prev_track_indices_, curr_track_indices_);
     accumulated_motion += motion;
     std::cout << "ACCUMULATED MOVEMENT = " << accumulated_motion << ", ANGLE = " << accumulated_motion.x / (2 * PI * 0.4485) * 360 * 1.57 << std::endl;
 
@@ -300,53 +300,53 @@ class FlowCalculator {
     current_twist.angular.z = motion.x / (2 * PI * 0.4485) * 2 * PI * 1.57 / (t_curr - t_prev);
     
     geometry_msgs::Twist output_twist = filter.add(current_twist);
-    twist_pub.publish(output_twist);
+    twist_pub_.publish(output_twist);
 
 
 
     // draw tracked points for visualization purposes
     // output image, marked up with flow points and stuff
     cv::Mat out_img = curr_color; // copy over so we can draw tracked points over top
-    // for(int i = 0; i < curr_track_indices.size(); ++i) {
-    //   circle(out_img, curr_track_indices[i], 3, Scalar(0, 255, 0), -1); // -1 = filled
+    // for(int i = 0; i < curr_track_indices_.size(); ++i) {
+    //   circle(out_img, curr_track_indices_[i], 3, Scalar(0, 255, 0), -1); // -1 = filled
     // }
 
     // draw epipolar lines for visualization purposes
     std::vector<cv::Vec<float, 3> > epilines1, epilines2;
-    cv::computeCorrespondEpilines(prev_track_indices, 1, F, epilines1); //Index starts with 1
-    cv::computeCorrespondEpilines(curr_track_indices, 2, F, epilines2);
+    cv::computeCorrespondEpilines(prev_track_indices_, 1, F, epilines1); //Index starts with 1
+    cv::computeCorrespondEpilines(curr_track_indices_, 2, F, epilines2);
 
-    CV_Assert(prev_track_indices.size() == epilines1.size() && epilines1.size() == epilines2.size());
+    CV_Assert(prev_track_indices_.size() == epilines1.size() && epilines1.size() == epilines2.size());
 
     cv::RNG rng(0);
-    for(int i = 0; i < prev_track_indices.size(); i++) {
+    for(int i = 0; i < prev_track_indices_.size(); i++) {
       // Epipolar lines of the 1st point set are drawn in the 2nd image and vice-versa
       cv::Scalar color(rng(256), rng(256), rng(256));
 
-      // cv::line(out_img, cv::Point(0,-epilines1[i][2]/epilines1[i][1]), cv::Point(prev.cols,-(epilines1[i][2]+epilines1[i][0]*prev.cols)/epilines1[i][1]), color);
-      // cv::circle(out_img, curr_track_indices[i], 3, color, -1, CV_AA);
-      cv::circle(out_img, curr_track_indices[i], 3, cv::Scalar(0, 255, 0), -1, CV_AA);
+      // cv::line(out_img, cv::Point(0,-epilines1[i][2]/epilines1[i][1]), cv::Point(prev_.cols,-(epilines1[i][2]+epilines1[i][0]*prev_.cols)/epilines1[i][1]), color);
+      // cv::circle(out_img, curr_track_indices_[i], 3, color, -1, CV_AA);
+      cv::circle(out_img, curr_track_indices_[i], 3, cv::Scalar(0, 255, 0), -1, CV_AA);
     }
 
     cv::imshow(ColorWinName, out_img);
     cv::waitKey(30); // 30 Hz camera = 33.3 ms per callback loop, hold for 30
 
     // TODO replace with std::swap?
-    curr.copyTo(prev);
+    curr_.copyTo(prev_);
 
-    prev_track_indices = curr_track_indices; // deep copy, MAKE SURE TO COMMENT OUT IF I REVERT TO CALLING goodFeaturesToTrack EACH LOOP
+    prev_track_indices_ = curr_track_indices_; // deep copy, MAKE SURE TO COMMENT OUT IF I REVERT TO CALLING goodFeaturesToTrack EACH LOOP
 
     // this function emulates std::remove_if, which is technically only available
     // in c++ version 11 or greater, and also does not work with OpenCV types
-    std::vector<cv::Point2f>::iterator first = prev_track_indices.begin();
+    std::vector<cv::Point2f>::iterator first = prev_track_indices_.begin();
     std::vector<cv::Point2f>::iterator new_start = first;
-    std::vector<cv::Point2f>::iterator last = prev_track_indices.end();
+    std::vector<cv::Point2f>::iterator last = prev_track_indices_.end();
     while(first!=last) {
       if ((*first).x < 0.0 || (*first).x > CAM_PIX_U || (*first).y < 0.0 || (*first).y > CAM_PIX_V) {
         // cout << "made it into the mystical for loop!" << endl;
         // cout << "swapping this:" << *new_start;
         // *new_start = *first;
-        prev_track_indices.erase(first);
+        prev_track_indices_.erase(first);
         //
         // cout << " and this:" << *new_start << endl;
         // ++new_start;
@@ -356,10 +356,10 @@ class FlowCalculator {
     }
     // cout << "made it here" << endl;
 
-    prev_track_indices.begin() = new_start;
+    prev_track_indices_.begin() = new_start;
 
     // THIS IS SEGFAULTING RIGHT NOW, FIGURE IT OUT LATER
-    // RemoveOutOfBounds(prev_track_indices);
+    // RemoveOutOfBounds(prev_track_indices_);
 
     ++counter %= TRAIL_LENGTH;
     t_prev = t_curr;
@@ -376,7 +376,7 @@ class FlowCalculator {
 //     // 2 mean number of iteration of algorithm
 //     // 8 is polynomial degree expansion recommended value are 5 - 7
 //     // 1.2 standard deviation used to smooth used derivatives recommended values from 1.1 - 1,5
-//     calcOpticalFlowFarneback(prev, curr, curr_track_indices_mat, 0.5, 4, 21, 3, 7, 1.2, 0);
+//     calcOpticalFlowFarneback(prev_, curr_, curr_track_indices_mat, 0.5, 4, 21, 3, 7, 1.2, 0);
 //     // cout << "curr_track_indices_mat SIZE:\n" << curr_track_indices_mat.size() << '\n' << endl;
 //
 //     //vector<unsigned char> F_indices_mask; // outliers from RANSAC or LMedS when finding F
@@ -400,7 +400,7 @@ class FlowCalculator {
 //     imshow(ColorWinName, out_img);
 //     cv::waitKey(30); // 30 Hz camera = 33.3 ms per callback loop
 //
-//     curr.copyTo(prev);
+//     curr_.copyTo(prev_);
 //
 //     ++counter %= TRAIL_LENGTH;
 
@@ -670,7 +670,7 @@ class FlowCalculator {
   //  // not work with OpenCV types anyway
   //  for(vector<Point2f>::iterator it = v.begin(); it != v.end(); ++it) {
   //    if((*it).x < 0.0 || (*it).x > CAM_PIX_U || (*it).y < 0.0 || (*it).y > CAM_PIX_V) {
-  //      prev_track_indices.erase(it);
+  //      prev_track_indices_.erase(it);
   //    }
   //  }
 

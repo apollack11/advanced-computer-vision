@@ -1,3 +1,5 @@
+#pragma once
+
 #include <list>
 
 #include <geometry_msgs/Twist.h>
@@ -5,10 +7,10 @@
 
 namespace utils {
 
+
 // If either the x or y component is greater than the threshold, return the
 // input object. Otherwise, return zeroes.
 cv::Point3f deadbandXY(const cv::Point3f& input, const float threshold);
-
 
 // Simple class for tracking and serving a moving average, given input
 // data and a maximum number of elements to use for the average.
@@ -23,4 +25,6 @@ class MovingAverageFilter {
   size_t max_elements_;
   std::list<geometry_msgs::Twist> elements_;
 };
+
+
 } // namespace utils

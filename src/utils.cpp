@@ -6,7 +6,6 @@
 #include <geometry_msgs/Twist.h>
 #include <opencv2/core/types.hpp>
 
-
 namespace utils {
 
 
